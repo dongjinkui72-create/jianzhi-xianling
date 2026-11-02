@@ -8,7 +8,7 @@ import { palette, radius } from '../theme/tokens';
 import { useScale } from '../theme/useScale';
 import { useApp } from '../store/AppStore';
 import { useLaunch } from '../launch/LaunchProvider';
-import { maskKey } from '../lib/format';
+import { truncate } from '../lib/format';
 
 /**
  * 底部导航（水晶玻璃）。
@@ -140,7 +140,7 @@ export function CrystalTabBar({ state, navigation }: BottomTabBarProps) {
             <Ionicons name={enabled ? 'play' : 'play'} size={sc.s(enabled ? 34 : 30)} color={enabled ? '#FFFFFF' : palette.disabledInk} style={{ marginLeft: enabled ? sc.s(3) : 0 }} />
             {enabled ? (
               <Text numberOfLines={1} style={{ position: 'absolute', bottom: sc.s(11), fontSize: sc.fs(9.5), color: 'rgba(255,255,255,0.94)', fontWeight: '800', maxWidth: sc.fabSize - sc.s(14), textAlign: 'center' }}>
-                {selected ? maskKey(selected.maskedKey).slice(-4) : '启动'}
+                {selected ? truncate(selected.label, 6) : '启动'}
               </Text>
             ) : null}
           </Pressable>
