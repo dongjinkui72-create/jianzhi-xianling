@@ -34,6 +34,9 @@ export function platformMismatch(c: ChatClient): boolean {
 }
 
 export async function detectClient(c: ChatClient): Promise<{ status: DetectStatus; reason: string | null }> {
+  if (c.browserBased) {
+    return { status: 'unknown', reason: '网页版 / PWA 通过浏览器打开，无需安装检测' };
+  }
   if (platformMismatch(c)) {
     return { status: 'not_installed', reason: `${Platform.OS === 'ios' ? 'iOS' : 'Android'} 平台没有对应版本` };
   }

@@ -62,7 +62,9 @@ export function LaunchProvider({ children }: { children: React.ReactNode }) {
 
   /** 候选：优先能全自动导入的，其次已识别安装的，最后是「无法确认」的 */
   const candidates = useMemo(() => {
-    const usable = app.clients.filter((c) => c.detected !== 'not_installed' && (c.platform === 'all' || c.platform === Platform.OS));
+    const usable = app.clients.filter(
+      (c) => (c.browserBased || c.detected !== 'not_installed') && (c.platform === 'all' || c.platform === Platform.OS),
+    );
     const rank = (c: ChatClient) => (canAutoImport(c) ? 0 : c.detected === 'installed' ? 1 : 2);
     return [...usable].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
   }, [app.clients]);
@@ -121,7 +123,7 @@ export function LaunchProvider({ children }: { children: React.ReactNode }) {
       {/* 选择聊天软件 */}
       <Sheet visible={pickerOpen} onClose={() => setPickerOpen(false)} title="选择要启动的 AI 聊天软件">
         <Notice tone="accent" title="全自动导入说明">
-          选中带「可全自动导入」标记的软件，API 密钥与调用地址会由本 App 通过官方 deep link 直接写入，全程不需要你复制粘贴。
+          选中带「可全自动导入」标记的软件：Chatbox 走官方 deep link 直写配置，LobeChat 走官方 URL 参数写入（网页版 / PWA / 桌面版）。全程不需要你复制粘贴。其它软件只能拉起，App 会明说。
         </Notice>
         <View style={{ height: sc.s(12) }} />
         {candidates.map((c) => {
@@ -137,7 +139,18 @@ export function LaunchProvider({ children }: { children: React.ReactNode }) {
                     {c.name}
                   </Text>
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sc.s(5), marginTop: sc.s(5) }}>
-                    <Chip label={auto ? '可全自动导入' : c.importKind === 'launch_only' ? '仅能打开' : '导入能力无法确认'} tone={auto ? 'ok' : c.importKind === 'launch_only' ? 'warn' : 'muted'} />
+                    <Chip
+                      label={
+                        c.importKind === 'deeplink_import'
+                          ? '可全自动导入（deep link）'
+                          : c.importKind === 'url_settings_import'
+                            ? '可全自动导入（URL 参数）'
+                            : c.importKind === 'launch_only'
+                              ? '仅能打开'
+                              : '导入能力无法确认'
+                      }
+                      tone={auto ? 'ok' : c.importKind === 'launch_only' ? 'warn' : 'muted'}
+                    />
                     <Chip
                       label={c.detected === 'installed' ? '已识别安装' : c.detected === 'unknown' ? '安装状态无法确认' : '未安装'}
                       tone={c.detected === 'installed' ? 'accent' : 'muted'}
@@ -178,7 +191,7 @@ export function LaunchProvider({ children }: { children: React.ReactNode }) {
         {result ? (
           <>
             <Notice
-              tone={result.ok ? (result.mode === 'auto_import' ? 'ok' : 'warn') : 'danger'}
+              tone={result.ok ? (result.mode === 'auto_import' || result.mode === 'url_import' ? 'ok' : 'warn') : 'danger'}
               title={result.title}
             >
               {result.message}

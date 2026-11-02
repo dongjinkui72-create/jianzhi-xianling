@@ -13,6 +13,8 @@ const F = require(path.join(base, 'lib', 'format.js'));
 const B = require(path.join(base, 'lib', 'base64.js'));
 const S = require(path.join(base, 'data', 'seed.js'));
 const R = require(path.join(base, 'services', 'relayApi.js'));
+const I = require(path.join(base, 'lib', 'importUrls.js'));
+const REG = require(path.join(base, 'data', 'chatAppRegistry.js'));
 
 let pass = 0;
 let fail = 0;
@@ -160,31 +162,72 @@ t('New API 响应解包兼容两种形态', () => {
   assert.strictEqual(R.envelope({ ok: true, status: 200, data: [1, 2] }).data.length, 2);
 });
 
-console.log('\n[7] Chatbox deep link —— 核心功能② 全自动导入');
-t('deep link 可被标准 URL 解析，并能还原密钥与调用地址', () => {
-  const payload = { apiHost: 'https://anyrouter.top/v1', apiKey: 'sk-测试密钥ABC123', name: '剪纸仙灵·云雾' };
-  const data = B.toBase64(JSON.stringify(payload));
-  const url = 'chatbox://app/import-config?type=openai_compatible&data=' + encodeURIComponent(data);
+console.log('\n[7] 全自动导入 URL 构造（Chatbox / LobeChat）');
+const KEY = { id: 'k1', relayId: null, label: '云雾·主号', maskedKey: 'sk-abc****7890', secretRef: 'r', baseUrl: 'https://anyrouter.top', provider: '云雾', protocol: 'openai_compatible', status: 'ok', remainingTokens: null, remainingUsd: null, statusNote: null, checkedAt: null, source: 'auto', createdAt: 0 };
+const SECRET = 'sk-测试密钥ABC123';
+
+t('Chatbox deep link 可解析且能还原密钥与调用地址', () => {
+  const client = REG.CHAT_APP_REGISTRY.find((x) => x.id === 'chatbox');
+  const url = I.buildImportUrl(client, KEY, SECRET);
+  assert.ok(url, '应能构造出 URL');
   const u = new URL(url);
   assert.strictEqual(u.protocol, 'chatbox:');
-  assert.strictEqual(u.hostname, 'app');
-  assert.strictEqual(u.pathname, '/import-config');
   assert.strictEqual(u.searchParams.get('type'), 'openai_compatible');
   const back = JSON.parse(Buffer.from(u.searchParams.get('data'), 'base64').toString('utf8'));
-  assert.deepStrictEqual(back, payload, '还原结果不一致: ' + JSON.stringify(back));
-});
-t('base64 与 Buffer 结果一致（含中文与 emoji）', () => {
-  const s = '剪纸仙灵 🧧 api-key/"\'+&=?#';
-  assert.strictEqual(B.toBase64(s), Buffer.from(s, 'utf8').toString('base64'));
-});
-t('五种协议类型映射齐全', () => {
-  for (const ty of ['openai_compatible', 'openai_response', 'gemini', 'claude', 'ollama', 'lmstudio']) {
-    const payload = { apiHost: 'https://x', apiKey: 'k' };
-    const url = 'chatbox://app/import-config?type=' + ty + '&data=' + encodeURIComponent(B.toBase64(JSON.stringify(payload)));
-    assert.strictEqual(new URL(url).searchParams.get('type'), ty);
-  }
+  assert.strictEqual(back.apiKey, SECRET);
+  assert.strictEqual(back.apiHost, 'https://anyrouter.top/v1');
 });
 
+t('LobeChat URL 参数写入 keyVaults.openai', () => {
+  const client = REG.CHAT_APP_REGISTRY.find((x) => x.id === 'lobechat');
+  const url = I.buildImportUrl(client, KEY, SECRET);
+  assert.ok(url.startsWith('https://chat.lobehub.com/?settings='), '应以 base + ?settings= 开头: ' + url);
+  const settings = JSON.parse(decodeURIComponent(url.split('?settings=')[1]));
+  assert.strictEqual(settings.keyVaults.openai.apiKey, SECRET);
+  assert.strictEqual(settings.keyVaults.openai.baseURL, 'https://anyrouter.top/v1');
+});
+
+t('协议映射齐全（claude/gemini 走对应 keyVaults 与 type）', () => {
+  assert.strictEqual(I.lobeProviderFor('claude'), 'anthropic');
+  assert.strictEqual(I.lobeProviderFor('gemini'), 'google');
+  assert.strictEqual(I.chatboxTypeFor('gemini'), 'gemini');
+  assert.strictEqual(I.chatboxTypeFor('openai_compatible'), 'openai_compatible');
+});
+
+console.log('\n[8] 适配器登记表 —— 诚实性不变量');
+t('标「可全自动导入」的适配器必须有模板', () => {
+  for (const c of REG.CHAT_APP_REGISTRY) {
+    if (c.importKind === 'deeplink_import') assert.ok(c.importTemplate, c.id + ' 缺 importTemplate');
+    if (c.importKind === 'url_settings_import') assert.ok(c.settingsTemplate, c.id + ' 缺 settingsTemplate');
+  }
+});
+t('标「无法确认」的适配器绝不允许带导入模板（防止贸然发送）', () => {
+  for (const c of REG.CHAT_APP_REGISTRY) {
+    if (c.importKind === 'unconfirmed') {
+      assert.ok(!c.importTemplate && !c.settingsTemplate, c.id + ' 不应带导入模板');
+      assert.ok(I.canAutoImport(c) === false, c.id + ' 不应被判为可自动导入');
+    }
+  }
+});
+t('每条适配器都有诚实说明', () => {
+  for (const c of REG.CHAT_APP_REGISTRY) assert.ok(c.note && c.note.length > 4, c.id + ' 缺 note');
+});
+t('内置适配器覆盖开源项目（GitHub）', () => {
+  const ids = REG.CHAT_APP_REGISTRY.map((c) => c.id);
+  for (const need of ['deepchat', 'cherrystudio', 'lobechat']) assert.ok(ids.includes(need), '缺少 ' + need);
+});
+t('仓库自带 adapters/clients.json 合法且与内置一致', () => {
+  const fs = require('fs');
+  const file = path.join(__dirname, '..', 'adapters', 'clients.json');
+  const json = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.ok(Array.isArray(json.adapters) && json.adapters.length >= 3);
+  for (const a of json.adapters) {
+    assert.ok(['deeplink_import', 'url_settings_import', 'launch_only', 'unconfirmed'].includes(a.importKind), a.id + ' importKind 非法');
+    if (a.importKind === 'deeplink_import') assert.ok(a.importTemplate, a.id);
+    if (a.importKind === 'url_settings_import') assert.ok(a.settingsTemplate, a.id);
+    if (a.importKind === 'unconfirmed') assert.ok(!a.importTemplate && !a.settingsTemplate, a.id);
+  }
+});
 console.log('\n────────────────────────────');
 console.log(`通过 ${pass} 项，失败 ${fail} 项`);
 if (fail) process.exit(1);

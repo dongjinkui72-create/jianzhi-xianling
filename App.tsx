@@ -1,9 +1,7 @@
-import 'react-native-gesture-handler';
 import React from 'react';
 import { ActivityIndicator, Text, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { LinearGradient } from 'expo-linear-gradient';
 import { AppProvider, useApp } from './src/store/AppStore';
 import { LaunchProvider } from './src/launch/LaunchProvider';
@@ -46,13 +44,11 @@ function BootGate() {
 
 export default function App() {
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <SafeAreaProvider>
+    <SafeAreaProvider>
         <StatusBar style="dark" />
         <AppProvider>
           <BootGate />
         </AppProvider>
-      </SafeAreaProvider>
-    </GestureHandlerRootView>
+    </SafeAreaProvider>
   );
 }

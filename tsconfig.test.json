@@ -12,5 +12,5 @@
     "resolveJsonModule": true,
     "jsx": "react"
   },
-  "include": ["src/lib/**/*", "src/data/seed.ts", "src/services/relayApi.ts"]
+  "include": ["src/lib/**/*", "src/data/seed.ts", "src/data/chatAppRegistry.ts", "src/services/relayApi.ts"]
 }

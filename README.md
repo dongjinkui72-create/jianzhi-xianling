@@ -14,7 +14,8 @@ npm install
 npx expo start          # 扫码用 Expo Go 先看看界面
 ```
 
-> ⚠️ 想让「自动识别已安装的聊天软件」真正生效，必须用**开发版**而不是 Expo Go：
+> 适配 **Android 10（API 29）及以上**（minSdkVersion 24，向下兼容到 Android 7；目标 SDK 36）。
+>⚠️ 想让「自动识别已安装的聊天软件」真正生效，必须用**开发版**而不是 Expo Go：
 >
 > ```bash
 > npx expo prebuild --clean
@@ -48,20 +49,41 @@ UI 会明确告诉你「这个站点没法自动建档」，并给出手动粘�
 
 ### ② 点启动按钮 → 拉起聊天软件 → 全自动导入，零复制粘贴
 
-启动走的是 **Chatbox 官方的「导入第三方提供方配置」deep link**（自 v1.15.1 起支持）：
+「能不能自动导入」被做成了**数据驱动的适配器注册表**（`src/data/chatAppRegistry.ts` + `src/lib/importUrls.ts`），
+每种软件一条适配器，按 `importKind` 分四类，全部如实回报：
 
+| importKind | 含义 | 当前覆盖 |
+| --- | --- | --- |
+| `deeplink_import` | 目标 App 官方 deep link 直写提供方配置 | **Chatbox**（v1.15.1+，`chatbox://app/import-config?type=&data=`） |
+| `url_settings_import` | 通过 URL 参数把 keyVaults 写进目标 App | **LobeChat**（官方「URL 分享配置」：`{base}/?settings={"keyVaults":{...}}`，网页版 / PWA / 桌面版） |
+| `launch_only` | 只能拉起，无法写入密钥，UI 明说 | DeepChat（官方 DeepLinks 只到「开始聊天 / 装 MCP」）、ChatGPT / Claude / Gemini / DeepSeek / Kimi / 豆包 / 通义 / 元宝 / Grok / Poe |
+| `unconfirmed` | 协议未核实，**绝不贸然发送** | Cherry Studio（已发现 `cherrystudio://providers/api-keys` 入口但参数结构未核实）、NextChat、ChatWise、OpenCat |
+
+密钥明文只从本机 SecureStore 读出后直接拼进链接交给目标 App，**全程不经过剪贴板**。
+
+#### 长尾软件（含 GitHub 开源项目）不用发新版就能支持
+
+仓库自带 `adapters/clients.json`。把它传到 GitHub 后，在「设置 → 导入适配器清单」里填 raw 地址，
+App 启动时会自动拉取并合并，新增/修正某个软件的导入协议**不需要更新 App**。清单是公开 JSON，不含任何私有数据。
+
+```json
+{
+  "adapters": [
+    {
+      "id": "chatbox",
+      "name": "Chatbox",
+      "scheme": "chatbox",
+      "importKind": "deeplink_import",
+      "importTemplate": "chatbox://app/import-config?type={type}&data={data}",
+      "platform": "all",
+      "note": "诚实说明"
+    }
+  ]
+}
 ```
-chatbox://app/import-config?type=<TYPE>&data=<BASE64(JSON)>
-JSON = { "apiHost": "https://your-relay.com/v1", "apiKey": "sk-...", "name": "备注名" }
-TYPE = openai_compatible | openai_response | gemini | claude | ollama | lmstudio
-```
 
-由 Chatbox 自己解析并写入配置，**全程不经过剪贴板**，用户不需要复制粘贴任何字符。
-密钥明文只从本机 SecureStore 读出后直接交给目标 App。
-
-其它聊天软件若没有公开同类协议，App 只会「拉起」并**明确标注**
-`仅能打开` / `导入能力无法确认`，不会谎报「已导入」。
-
+不变量（`npm run verify` 里有断言守着）：标 `unconfirmed` 的适配器**不允许**带导入模板，
+从代码层面杜绝「没核实就发送」。
 ---
 
 ## 三个入口 + 一个圆形启动按钮
@@ -184,3 +206,34 @@ src/
 ## License
 
 MIT
+
+---
+
+## 本机 Windows 出包配方（已验证可产出 APK）
+
+Windows 上打 RN 的 release 包有三个坑，本仓库都给了开关/脚本：
+
+1. **JDK 17 + Android SDK/NDK**：本机构建链放在 `D:\android-toolchain`（JDK 17.0.2、platform-36、build-tools 36.0.0、NDK 27.1.12297006、CMake 3.30.5），Gradle 缓存复用 `D:\gradle-home`，镜像走阿里云/腾讯。
+2. **ninja 的 260 字符路径上限**：RN codegen 的对象目录在中文/长路径下必超。两步绕开：
+   - `scripts/fix-win-longpaths.ps1 -ProjectDir <构建副本>`：把各原生库 codegen 生成目录挂成 `D:\cg\<x>` 短联接并改写其 `jni/CMakeLists.txt`；
+   - 构建时设 `JZ_SHORT_BUILDDIR=1`，`android/build.gradle` 会把各模块 buildDir 重定向到 `D:/b/android-<hash>`（映射见 `D:/b/_mapping.txt`）。其它环境不设该变量则完全不受影响。
+3. **中文路径**：Gradle/CMake/AGP 在中文目录下会转码出错。构建副本请放在纯英文路径（本机为 `D:\p`），并把 `TEMP/TMP` 与 `java.io.tmpdir` 指到英文目录。
+
+其它构建决策：
+- `newArchEnabled=false`：新架构下 RN 核心 codegen 的对象路径在 Windows 上必然超限；旧架构在 RN 0.88 仍受支持，功能不受影响。
+- 移除了 `react-native-gesture-handler`：底部导航并不依赖它，而它的 codegen 源目录是路径超限的最大来源。
+- 测试包关闭了 R8 混淆（`android.enableMinifyInReleaseBuilds=false`），正式分发时可在非 Windows 环境开启。
+
+出包命令（构建副本内）：
+
+```bash
+gradlew.bat assembleRelease      # 产物 android/app/build/outputs/apk/release/app-release.apk
+```
+
+APK 签名当前使用 debug keystore（便于直接安装测试）；正式分发请自建 keystore 并配置 `signingConfigs.release`。
+
+## 系统支持范围
+
+- **Android 10（API 29）及以上**为设计目标；`minSdkVersion 24`，实际向下兼容到 Android 7。
+- 产物架构：`arm64-v8a`（当前测试包）。需要 32 位老设备时在 `gradle.properties` 里把 `reactNativeArchitectures` 加回 `armeabi-v7a` 重新出包。
+- iOS 需 macOS + Xcode 出包，代码与主题已按 iOS 水晶玻璃规范写好。

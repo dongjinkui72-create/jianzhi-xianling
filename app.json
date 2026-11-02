@@ -20,7 +20,6 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#F7FAFF"
       },
-      "edgeToEdgeEnabled": true,
       "permissions": []
     },
     "ios": {
@@ -33,7 +32,16 @@
     "plugins": [
       "expo-sqlite",
       "expo-secure-store",
-      "./plugins/withChatAppQueries"
+      "expo-system-ui",
+      "./plugins/withChatAppQueries",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 24
+          }
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": false

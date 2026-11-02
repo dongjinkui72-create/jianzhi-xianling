@@ -102,6 +102,12 @@ export async function getDb(): Promise<SQLite.SQLiteDatabase> {
       bundle_id TEXT,
       import_kind TEXT NOT NULL DEFAULT 'unconfirmed',
       import_template TEXT,
+      settings_template TEXT,
+      settings_base TEXT,
+      launch_template TEXT,
+      browser_based INTEGER NOT NULL DEFAULT 0,
+      note TEXT,
+      source TEXT NOT NULL DEFAULT 'builtin',
       platform TEXT NOT NULL DEFAULT 'all',
       builtin INTEGER NOT NULL DEFAULT 0,
       detected TEXT NOT NULL DEFAULT 'unknown',
@@ -118,6 +124,21 @@ export async function getDb(): Promise<SQLite.SQLiteDatabase> {
     CREATE INDEX IF NOT EXISTS idx_keys_status ON api_keys(status);
     CREATE INDEX IF NOT EXISTS idx_logs_relay ON checkin_logs(relay_id, at DESC);
   `);
+  // 旧库迁移：补适配器新字段（新装用户不受影响）
+  for (const stmt of [
+    'ALTER TABLE clients ADD COLUMN settings_template TEXT',
+    'ALTER TABLE clients ADD COLUMN settings_base TEXT',
+    'ALTER TABLE clients ADD COLUMN launch_template TEXT',
+    'ALTER TABLE clients ADD COLUMN browser_based INTEGER NOT NULL DEFAULT 0',
+    'ALTER TABLE clients ADD COLUMN note TEXT',
+    "ALTER TABLE clients ADD COLUMN source TEXT NOT NULL DEFAULT 'builtin'",
+  ]) {
+    try {
+      await db.execAsync(stmt);
+    } catch {
+      /* 列已存在则忽略 */
+    }
+  }
   instance = db;
   return db;
 }
@@ -130,8 +151,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
   preferredClientId: null,
   alwaysAskClient: true,
   feedUrls: [],
+  adapterFeedUrls: [],
   autoHealthCheck: true,
   lastRadarFetchAt: null,
+  lastAdapterFetchAt: null,
 };
 
 export async function loadSettings(): Promise<AppSettings> {
@@ -393,7 +416,9 @@ export async function listBenefits(): Promise<Benefit[]> {
 
 interface ClientRow {
   id: string; name: string; scheme: string | null; package_name: string | null; bundle_id: string | null;
-  import_kind: string; import_template: string | null; platform: string; builtin: number;
+  import_kind: string; import_template: string | null; settings_template: string | null;
+  settings_base: string | null; launch_template: string | null; browser_based: number;
+  note: string | null; source: string; platform: string; builtin: number;
   detected: string; detect_reason: string | null; added_at: number;
 }
 
@@ -406,6 +431,12 @@ function rowToClient(r: ClientRow): ChatClient {
     iosBundleId: r.bundle_id,
     importKind: (r.import_kind as ImportKind) || 'unconfirmed',
     importTemplate: r.import_template ?? undefined,
+    settingsTemplate: r.settings_template ?? undefined,
+    settingsBase: r.settings_base ?? undefined,
+    launchTemplate: r.launch_template ?? undefined,
+    browserBased: !!r.browser_based,
+    note: r.note ?? undefined,
+    source: (r.source as ChatClient['source']) || 'builtin',
     platform: (r.platform as ChatClient['platform']) || 'all',
     builtin: !!r.builtin,
     detected: (r.detected as DetectStatus) || 'unknown',
@@ -424,14 +455,20 @@ export async function upsertClient(c: ChatClient): Promise<void> {
   const db = await getDb();
   await db.runAsync(
     `INSERT INTO clients (id, name, scheme, package_name, bundle_id, import_kind, import_template,
+       settings_template, settings_base, launch_template, browser_based, note, source,
        platform, builtin, detected, detect_reason, added_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
      ON CONFLICT(id) DO UPDATE SET
        name=excluded.name, scheme=excluded.scheme, package_name=excluded.package_name,
        bundle_id=excluded.bundle_id, import_kind=excluded.import_kind, import_template=excluded.import_template,
+       settings_template=excluded.settings_template, settings_base=excluded.settings_base,
+       launch_template=excluded.launch_template, browser_based=excluded.browser_based,
+       note=excluded.note, source=excluded.source,
        platform=excluded.platform, builtin=excluded.builtin, detected=excluded.detected,
        detect_reason=excluded.detect_reason`,
     c.id, c.name, c.scheme, c.androidPackage, c.iosBundleId, c.importKind, c.importTemplate ?? null,
+    c.settingsTemplate ?? null, c.settingsBase ?? null, c.launchTemplate ?? null,
+    c.browserBased ? 1 : 0, c.note ?? null, c.source || 'builtin',
     c.platform, c.builtin ? 1 : 0, c.detected, c.detectReason, c.addedAt,
   );
 }

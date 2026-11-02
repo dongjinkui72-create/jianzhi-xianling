@@ -103,13 +103,18 @@ export interface CheckinLog {
   gainedUsd: number | null;
 }
 
-/** AI 聊天软件的自动导入能力 */
+/**
+ * AI 聊天软件的自动导入能力（适配器类型）。
+ * 红线：做不到就如实标注，绝不谎报「已导入」。
+ */
 export type ImportKind =
-  /** deep link 直接写入提供方配置，全自动，无需用户复制粘贴 */
+  /** 目标 App 官方 deep link 直写提供方配置（Chatbox），全自动、零复制粘贴 */
   | 'deeplink_import'
-  /** 只能拉起 App，配置需用户在对方 App 内完成 */
+  /** 通过 URL 参数把配置写进目标 App 的网页版 / PWA / 桌面版（LobeChat） */
+  | 'url_settings_import'
+  /** 只能拉起 App（可带模型/消息参数），无法写入密钥 */
   | 'launch_only'
-  /** 无法确认（原生壳拿不到白名单 / 未收录协议） */
+  /** 协议未收录或参数结构未核实，UI 标「无法确认」 */
   | 'unconfirmed';
 
 export type DetectStatus = 'installed' | 'not_installed' | 'unknown';
@@ -121,13 +126,25 @@ export interface ChatClient {
   androidPackage: string | null;
   iosBundleId: string | null;
   importKind: ImportKind;
-  /** deep link 模板，{type} 与 {data} 会被替换 */
+  /** deeplink_import 的 URL 模板，{type} 与 {data} 会被替换 */
   importTemplate?: string;
+  /** url_settings_import 的 URL 模板，{base} 与 {json} 会被替换 */
+  settingsTemplate?: string;
+  /** url_settings_import 的默认站点地址（可在设置里改） */
+  settingsBase?: string;
+  /** launch_only 的拉起模板，默认 {scheme}:// */
+  launchTemplate?: string;
+  /** 走浏览器/网页版，无需安装检测 */
+  browserBased?: boolean;
+  /** 如实说明该适配器的能力边界 */
+  note?: string;
   platform: 'all' | 'android' | 'ios';
   builtin: boolean;
   detected: DetectStatus;
   detectReason: string | null;
   addedAt: number;
+  /** 适配器来源：内置 / 远程清单 / 用户自建 */
+  source: 'builtin' | 'feed' | 'custom';
 }
 
 export interface AppSettings {
@@ -141,7 +158,10 @@ export interface AppSettings {
   alwaysAskClient: boolean;
   /** 情报源（可追加） */
   feedUrls: string[];
+  /** 聊天软件适配器清单（远程，可追加；GitHub 上的开源软件靠它扩展） */
+  adapterFeedUrls: string[];
   /** 自动体检 */
   autoHealthCheck: boolean;
   lastRadarFetchAt: number | null;
+  lastAdapterFetchAt: number | null;
 }

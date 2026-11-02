@@ -12,6 +12,7 @@ import type { ApiKeyItem, ApiProtocol, AppSettings, Benefit, ChatClient, Checkin
 import { detectClients, shellCapabilityNote } from '../services/detectApps';
 import { checkKeyHealth } from '../services/healthCheck';
 import { offlineBenefits, refreshRadar, type FetchReport } from '../services/radarFeed';
+import { fetchAdapters } from '../services/adapterFeed';
 import { autoProvisionApiKey, createSystemAccessToken, doCheckin, fetchCheckinSupport, fetchSelf, httpTransport, joinApiBase, type Transport } from '../services/relayApi';
 
 interface NewKeyInput {
@@ -63,7 +64,19 @@ interface StoreValue {
   checkinAll: (transports?: Record<string, Transport>) => Promise<CheckinLog[]>;
 
   rescanClients: () => Promise<void>;
-  addCustomClient: (name: string, scheme: string, autoImport: boolean) => Promise<void>;
+  refreshAdapters: (force?: boolean) => Promise<void>;
+  adapterNotes: string[];
+  updateClient: (c: ChatClient) => Promise<void>;
+  addCustomClient: (input: {
+    name: string;
+    scheme: string;
+    importKind: ChatClient['importKind'];
+    importTemplate?: string;
+    settingsTemplate?: string;
+    settingsBase?: string;
+    launchTemplate?: string;
+    browserBased?: boolean;
+  }) => Promise<void>;
   removeCustomClient: (id: string) => Promise<void>;
 }
 
@@ -91,6 +104,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [checkinBusy, setCheckinBusy] = useState(false);
   const [selectedKeyId, setSelectedKeyId] = useState<string | null>(null);
   const [scanNote, setScanNote] = useState<string | null>(null);
+  const [adapterNotes, setAdapterNotes] = useState<string[]>([]);
   const booted = useRef(false);
 
   /* ------------------------------ 启动 ------------------------------ */
@@ -113,6 +127,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
               detected: 'unknown',
               detectReason: '尚未扫描',
               addedAt: Date.now(),
+              source: 'builtin',
             } as ChatClient);
           }
           cs = await DB.listClients();
@@ -184,6 +199,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         if (cancelled) return;
         setClients(detected);
         for (const c of detected) await DB.upsertClient(c);
+        refreshAdapters(false).catch(() => {});
       } catch {
         /* 扫描失败不影响主流程 */
       }
@@ -549,8 +565,55 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     [relays, relayTransport, checkinRelay, writeLog],
   );
 
-  /* ------------------------------ 聊天软件 ------------------------------ */
-  const rescanClients = useCallback(async () => {
+  /* ------------------------------ 远程适配器清单 ------------------------------ */
+  const refreshAdapters = useCallback(
+    async (force = false) => {
+      const urls = settings.adapterFeedUrls || [];
+      if (!urls.length) {
+        setAdapterNotes([]);
+        return;
+      }
+      const last = settings.lastAdapterFetchAt;
+      if (!force && last && Date.now() - last < 12 * 60 * 60 * 1000) return;
+      const { adapters, notes } = await fetchAdapters(urls);
+      setAdapterNotes(notes);
+      if (adapters.length) {
+        const existing = await DB.listClients();
+        for (const a of adapters) {
+          const cur = existing.find((x) => x.id === a.id);
+          const merged: ChatClient = cur
+            ? {
+                ...cur,
+                name: a.name,
+                scheme: a.scheme,
+                androidPackage: a.androidPackage,
+                iosBundleId: a.iosBundleId,
+                importKind: a.importKind,
+                importTemplate: a.importTemplate,
+                settingsTemplate: a.settingsTemplate,
+                settingsBase: a.settingsBase,
+                launchTemplate: a.launchTemplate,
+                browserBased: a.browserBased,
+                note: a.note,
+                platform: a.platform,
+                source: 'feed',
+              }
+            : a;
+          await DB.upsertClient(merged);
+        }
+        setClients(await DB.listClients());
+      }
+      await patchSettings({ lastAdapterFetchAt: Date.now() });
+    },
+    [settings.adapterFeedUrls, settings.lastAdapterFetchAt, patchSettings],
+  );
+
+  const updateClient = useCallback(async (c: ChatClient) => {
+    await DB.upsertClient(c);
+    setClients(await DB.listClients());
+  }, []);
+
+  /* ------------------------------ 聊天软件 ------------------------------ */  const rescanClients = useCallback(async () => {
     const note = shellCapabilityNote();
     setScanNote(note);
     const detected = await detectClients(clients);
@@ -558,25 +621,42 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     for (const c of detected) await DB.upsertClient(c);
   }, [clients]);
 
-  const addCustomClient = useCallback(async (name: string, scheme: string, autoImport: boolean) => {
-    const id = `custom_${uid('c')}`.replace(/[^A-Za-z0-9_]/g, '_');
-    const c: ChatClient = {
-      id,
-      name: name.trim() || '自定义软件',
-      scheme: scheme.trim().replace(/:\/+$/, '') || null,
-      androidPackage: null,
-      iosBundleId: null,
-      importKind: autoImport ? 'deeplink_import' : 'unconfirmed',
-      importTemplate: autoImport ? 'chatbox://app/import-config?type={type}&data={data}' : undefined,
-      platform: Platform.OS === 'ios' ? 'ios' : 'android',
-      builtin: false,
-      detected: 'unknown',
-      detectReason: '自定义条目，未扫描',
-      addedAt: Date.now(),
-    };
-    await DB.upsertClient(c);
-    setClients(await DB.listClients());
-  }, []);
+  const addCustomClient = useCallback(
+    async (input: {
+      name: string;
+      scheme: string;
+      importKind: ChatClient['importKind'];
+      importTemplate?: string;
+      settingsTemplate?: string;
+      settingsBase?: string;
+      launchTemplate?: string;
+      browserBased?: boolean;
+    }) => {
+      const id = `custom_${uid('c')}`.replace(/[^A-Za-z0-9_]/g, '_');
+      const c: ChatClient = {
+        id,
+        name: input.name.trim() || '自定义软件',
+        scheme: input.scheme.trim().replace(/:\/+$/, '') || null,
+        androidPackage: null,
+        iosBundleId: null,
+        importKind: input.importKind,
+        importTemplate: input.importTemplate || undefined,
+        settingsTemplate: input.settingsTemplate || undefined,
+        settingsBase: input.settingsBase || undefined,
+        launchTemplate: input.launchTemplate || undefined,
+        browserBased: !!input.browserBased,
+        platform: 'all',
+        builtin: false,
+        detected: 'unknown',
+        detectReason: '自定义条目，未扫描',
+        addedAt: Date.now(),
+        source: 'custom',
+      };
+      await DB.upsertClient(c);
+      setClients(await DB.listClients());
+    },
+    [],
+  );
 
   const removeCustomClient = useCallback(async (id: string) => {
     await DB.deleteClient(id);
@@ -618,6 +698,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       checkinRelay,
       checkinAll,
       rescanClients,
+      refreshAdapters,
+      adapterNotes,
+      updateClient,
       addCustomClient,
       removeCustomClient,
     }),
@@ -627,7 +710,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       patchSettings, doRefreshRadar, selectKey, addKey, updateKey, removeKey,
       runHealthCheck, getSecretOf, addRelayByUrl, updateRelay, removeRelay,
       relayTransport, provisionRelay, persistAccessToken, syncRelay,
-      checkinRelay, checkinAll, rescanClients, addCustomClient, removeCustomClient,
+      checkinRelay, checkinAll, rescanClients, refreshAdapters, adapterNotes, updateClient,
+      addCustomClient, removeCustomClient,
     ],
   );
 

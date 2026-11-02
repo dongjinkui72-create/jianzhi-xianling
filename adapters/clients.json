@@ -1,0 +1,45 @@
+{
+  "$schema": "adapters/clients.schema.json",
+  "updatedAt": "2026-11-02",
+  "adapters": [
+    {
+      "id": "chatbox",
+      "name": "Chatbox",
+      "scheme": "chatbox",
+      "androidPackage": "ai.chatbox",
+      "iosBundleId": "ai.chatbox.desktop",
+      "importKind": "deeplink_import",
+      "importTemplate": "chatbox://app/import-config?type={type}&data={data}",
+      "platform": "all",
+      "note": "官方 deep link 直写提供方配置（v1.15.1+），密钥不经剪贴板"
+    },
+    {
+      "id": "lobechat",
+      "name": "LobeChat（网页版 / PWA / 桌面版）",
+      "scheme": "lobehub",
+      "importKind": "url_settings_import",
+      "settingsTemplate": "{base}/?settings={json}",
+      "settingsBase": "https://chat.lobehub.com",
+      "browserBased": true,
+      "platform": "all",
+      "note": "官方 URL 分享配置；自建实例请改 base"
+    },
+    {
+      "id": "deepchat",
+      "name": "DeepChat（开源）",
+      "scheme": "deepchat",
+      "importKind": "launch_only",
+      "launchTemplate": "deepchat://start",
+      "platform": "all",
+      "note": "官方 DeepLinks 仅支持开始聊天 / 安装 MCP，无密钥写入协议"
+    },
+    {
+      "id": "cherrystudio",
+      "name": "Cherry Studio（开源）",
+      "scheme": "cherrystudio",
+      "importKind": "unconfirmed",
+      "platform": "all",
+      "note": "已发现 cherrystudio://providers/api-keys?v=1&data=... 入口，参数结构待核实；核实后把 importKind 改为 deeplink_import 并补 importTemplate 即可生效"
+    }
+  ]
+}

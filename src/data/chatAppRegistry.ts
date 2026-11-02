@@ -1,25 +1,35 @@
 import type { ChatClient } from '../lib/types';
 
 /**
- * 市面主流 AI 聊天软件登记表。
+ * 市面 AI 聊天软件适配器登记表（数据驱动）。
  *
- * importKind 的含义（产品红线：做不到就如实标注，绝不谎报）：
- *  - deeplink_import：目标 App 官方提供 deep link 可直写提供方配置，
- *                     能做到「点一下启动 → 密钥与调用地址全自动导入 → 用户零复制粘贴」。
- *  - launch_only    ：只能拉起 App，无法自动写入配置，UI 必须明说。
- *  - unconfirmed    ：协议未收录 / 原生壳白名单拿不到，UI 标「无法确认」。
+ * 每种软件一条适配器，importKind 决定启动按钮的行为：
+ *  - deeplink_import     目标 App 官方 deep link 直写提供方配置，全自动、零复制粘贴
+ *  - url_settings_import 通过 URL 参数把配置写进目标 App 的网页版 / PWA / 桌面版
+ *  - launch_only         只能拉起（可带模型/消息参数），无法写入密钥，UI 明说
+ *  - unconfirmed         协议未收录或参数结构未核实，UI 标「无法确认」，绝不贸然发送
  *
- * Chatbox 的 deep link 来自其官方文档《导入第三方提供方配置》（自 v1.15.1 起支持）：
- *   chatbox://app/import-config?type=<TYPE>&data=<BASE64(JSON)>
- *   JSON: { "apiHost": "...", "apiKey": "...", "name": "可选" }
- *   TYPE: openai_compatible / openai_response / gemini / claude / ollama / lmstudio
+ * 已核实来源：
+ *  - Chatbox     官方文档《导入第三方提供方配置》(v1.15.1+)：
+ *                chatbox://app/import-config?type=<TYPE>&data=<BASE64(JSON{apiHost,apiKey,name?})>
+ *  - LobeChat    官方博客《通过 URL 链接分享配置参数》：
+ *                {base}/?settings=<URL_ENCODED JSON{keyVaults:{<provider>:{apiKey,baseURL}}}>
+ *  - DeepChat    官方 wiki《DeepLinks》：只有 deepchat://start 与 deepchat://mcp/install，
+ *                没有写入 API 密钥的协议 -> 如实标 launch_only
+ *  - Cherry Studio 已知入口 cherrystudio://providers/api-keys?v=1&data=...，
+ *                但 data 的参数结构未能从源码核实 -> 如实标 unconfirmed，不贸然发送
+ *
+ * 长尾软件（尤其 GitHub 上的开源项目）通过「远程适配器清单」扩展，
+ * 无需发新版 App：见 src/services/adapterFeed.ts 与设置页。
  */
 
 export const CHATBOX_IMPORT_TEMPLATE = 'chatbox://app/import-config?type={type}&data={data}';
+export const LOBE_SETTINGS_TEMPLATE = '{base}/?settings={json}';
 
-type Seed = Omit<ChatClient, 'builtin' | 'detected' | 'detectReason' | 'addedAt'>;
+type Seed = Omit<ChatClient, 'builtin' | 'detected' | 'detectReason' | 'addedAt' | 'source'>;
 
 export const CHAT_APP_REGISTRY: Seed[] = [
+  /* ---------- 可全自动导入 ---------- */
   {
     id: 'chatbox',
     name: 'Chatbox',
@@ -29,70 +39,33 @@ export const CHAT_APP_REGISTRY: Seed[] = [
     importKind: 'deeplink_import',
     importTemplate: CHATBOX_IMPORT_TEMPLATE,
     platform: 'all',
-  },
-  {
-    id: 'chatbox-desktop',
-    name: 'Chatbox（桌面包名）',
-    scheme: 'chatbox',
-    androidPackage: 'ai.chatbox.desktop',
-    iosBundleId: null,
-    importKind: 'deeplink_import',
-    importTemplate: CHATBOX_IMPORT_TEMPLATE,
-    platform: 'android',
+    note: '官方 deep link 直写提供方配置，密钥不经剪贴板',
   },
   {
     id: 'lobechat',
-    name: 'LobeChat',
+    name: 'LobeChat（网页版 / PWA / 桌面版）',
     scheme: 'lobehub',
-    androidPackage: 'com.lobehub.app',
-    iosBundleId: 'com.lobehub.app',
-    importKind: 'unconfirmed',
-    platform: 'all',
-  },
-  {
-    id: 'nextchat',
-    name: 'NextChat',
-    scheme: 'nextchat',
-    androidPackage: 'com.github.yidadaa.chatgptnextweb',
-    iosBundleId: null,
-    importKind: 'unconfirmed',
-    platform: 'all',
-  },
-  {
-    id: 'opencat',
-    name: 'OpenCat',
-    scheme: 'opencat',
     androidPackage: null,
-    iosBundleId: 'tech.baye.opencat',
-    importKind: 'unconfirmed',
-    platform: 'ios',
-  },
-  {
-    id: 'cherrystudio',
-    name: 'Cherry Studio',
-    scheme: 'cherrystudio',
-    androidPackage: 'com.cherryai.studio',
     iosBundleId: null,
-    importKind: 'unconfirmed',
-    platform: 'android',
-  },
-  {
-    id: 'chatwise',
-    name: 'ChatWise',
-    scheme: 'chatwise',
-    androidPackage: 'com.chatwise.android',
-    iosBundleId: null,
-    importKind: 'unconfirmed',
+    importKind: 'url_settings_import',
+    settingsTemplate: LOBE_SETTINGS_TEMPLATE,
+    settingsBase: 'https://chat.lobehub.com',
+    browserBased: true,
     platform: 'all',
+    note: '通过 URL 参数写入 keyVaults；自建实例请在「设置 → 适配器」里改 base 地址',
   },
+
+  /* ---------- 只能拉起 ---------- */
   {
-    id: 'boltai',
-    name: 'BoltAI',
-    scheme: 'boltai',
-    androidPackage: 'com.boltai.android',
+    id: 'deepchat',
+    name: 'DeepChat（开源）',
+    scheme: 'deepchat',
+    androidPackage: null,
     iosBundleId: null,
-    importKind: 'unconfirmed',
+    importKind: 'launch_only',
+    launchTemplate: 'deepchat://start',
     platform: 'all',
+    note: '官方 DeepLinks 只支持开始聊天 / 安装 MCP，没有写入 API 密钥的协议',
   },
   {
     id: 'chatgpt',
@@ -102,6 +75,7 @@ export const CHAT_APP_REGISTRY: Seed[] = [
     iosBundleId: 'com.openai.chat',
     importKind: 'launch_only',
     platform: 'all',
+    note: '官方 App 不接受第三方密钥导入',
   },
   {
     id: 'claude',
@@ -111,6 +85,7 @@ export const CHAT_APP_REGISTRY: Seed[] = [
     iosBundleId: 'com.anthropic.cloude',
     importKind: 'launch_only',
     platform: 'all',
+    note: '官方 App 不接受第三方密钥导入',
   },
   {
     id: 'gemini',
@@ -120,6 +95,7 @@ export const CHAT_APP_REGISTRY: Seed[] = [
     iosBundleId: 'com.google.Gemini',
     importKind: 'launch_only',
     platform: 'all',
+    note: '官方 App 不接受第三方密钥导入',
   },
   {
     id: 'deepseek',
@@ -129,6 +105,7 @@ export const CHAT_APP_REGISTRY: Seed[] = [
     iosBundleId: 'com.deepseek.deepseek.chat',
     importKind: 'launch_only',
     platform: 'all',
+    note: '官方 App 不接受第三方密钥导入',
   },
   {
     id: 'kimi',
@@ -138,6 +115,7 @@ export const CHAT_APP_REGISTRY: Seed[] = [
     iosBundleId: 'com.moonshot.kimi',
     importKind: 'launch_only',
     platform: 'all',
+    note: '未公开密钥导入协议',
   },
   {
     id: 'doubao',
@@ -147,6 +125,7 @@ export const CHAT_APP_REGISTRY: Seed[] = [
     iosBundleId: 'com.larus.nova',
     importKind: 'launch_only',
     platform: 'all',
+    note: '未公开 URL Scheme 与密钥导入协议',
   },
   {
     id: 'tongyi',
@@ -156,6 +135,7 @@ export const CHAT_APP_REGISTRY: Seed[] = [
     iosBundleId: 'com.alibaba.tongyi',
     importKind: 'launch_only',
     platform: 'all',
+    note: '未公开密钥导入协议',
   },
   {
     id: 'yuanbao',
@@ -165,6 +145,7 @@ export const CHAT_APP_REGISTRY: Seed[] = [
     iosBundleId: 'com.tencent.hunyuan',
     importKind: 'launch_only',
     platform: 'all',
+    note: '未公开密钥导入协议',
   },
   {
     id: 'grok',
@@ -174,6 +155,7 @@ export const CHAT_APP_REGISTRY: Seed[] = [
     iosBundleId: 'ai.x.grok',
     importKind: 'launch_only',
     platform: 'all',
+    note: '未公开密钥导入协议',
   },
   {
     id: 'poe',
@@ -183,15 +165,58 @@ export const CHAT_APP_REGISTRY: Seed[] = [
     iosBundleId: 'com.quora.poe',
     importKind: 'launch_only',
     platform: 'all',
+    note: '未公开密钥导入协议',
+  },
+
+  /* ---------- 协议存在但参数未核实：如实标「无法确认」 ---------- */
+  {
+    id: 'cherrystudio',
+    name: 'Cherry Studio（开源）',
+    scheme: 'cherrystudio',
+    androidPackage: null,
+    iosBundleId: null,
+    importKind: 'unconfirmed',
+    platform: 'all',
+    note: '已发现 cherrystudio://providers/api-keys?v=1&data=... 入口，但 data 参数结构未能从源码核实，App 不贸然发送；可用远程适配器清单补上确切格式',
+  },
+  {
+    id: 'nextchat',
+    name: 'NextChat（开源）',
+    scheme: null,
+    androidPackage: null,
+    iosBundleId: null,
+    importKind: 'unconfirmed',
+    platform: 'all',
+    note: 'NextChat 的配置导入走「设置页导入 JSON 文件」，没有可自动化的对外协议',
+  },
+  {
+    id: 'chatwise',
+    name: 'ChatWise（开源）',
+    scheme: 'chatwise',
+    androidPackage: null,
+    iosBundleId: null,
+    importKind: 'unconfirmed',
+    platform: 'all',
+    note: '未核实到可自动写入密钥的协议',
+  },
+  {
+    id: 'opencat',
+    name: 'OpenCat',
+    scheme: 'opencat',
+    androidPackage: null,
+    iosBundleId: 'tech.baye.opencat',
+    importKind: 'unconfirmed',
+    platform: 'ios',
+    note: '未核实到可自动写入密钥的协议',
   },
 ];
 
-/** 具备「全自动导入」能力的客户端（核心功能②的真正落点） */
+/** 具备「全自动写入配置」能力的适配器 */
 export function autoImportCapable(c: ChatClient): boolean {
-  return c.importKind === 'deeplink_import' && !!c.importTemplate;
+  return (c.importKind === 'deeplink_import' && !!c.importTemplate) || (c.importKind === 'url_settings_import' && !!c.settingsTemplate);
 }
 
-/** 默认推荐：优先能全自动导入的（Chatbox） */
+/** 默认推荐：优先能全自动导入的 */
 export function preferredAutoClient(clients: ChatClient[]): ChatClient | null {
   return clients.find((c) => autoImportCapable(c) && c.detected !== 'not_installed') ?? null;
 }

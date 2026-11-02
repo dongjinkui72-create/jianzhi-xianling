@@ -28,10 +28,16 @@ export function SettingsScreen({ navigation }: any) {
   const [feedOpen, setFeedOpen] = useState(false);
   const [cName, setCName] = useState('');
   const [cScheme, setCScheme] = useState('');
-  const [cAuto, setCAuto] = useState(false);
   const [feedUrl, setFeedUrl] = useState('');
   const [scanning, setScanning] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  const [cKind, setCKind] = useState<ChatClient['importKind']>('unconfirmed');
+  const [cTemplate, setCTemplate] = useState('');
+  const [cBase, setCBase] = useState('');
+  const [cBrowser, setCBrowser] = useState(false);
+  const [adapterSheetOpen, setAdapterSheetOpen] = useState(false);
+  const [adapterUrl, setAdapterUrl] = useState('');
+  const [baseEdit, setBaseEdit] = useState<{ id: string; value: string } | null>(null);
 
   const installed = app.clients.filter((c) => c.detected === 'installed');
   const unknown = app.clients.filter((c) => c.detected === 'unknown' && (c.platform === 'all' || c.platform === Platform.OS));
@@ -52,13 +58,39 @@ export function SettingsScreen({ navigation }: any) {
       setNote('请填写软件名称');
       return;
     }
-    await app.addCustomClient(cName, cScheme, cAuto);
+    await app.addCustomClient({
+      name: cName,
+      scheme: cScheme,
+      importKind: cKind,
+      importTemplate: cKind === 'deeplink_import' ? cTemplate || 'chatbox://app/import-config?type={type}&data={data}' : undefined,
+      settingsTemplate: cKind === 'url_settings_import' ? cTemplate || '{base}/?settings={json}' : undefined,
+      settingsBase: cKind === 'url_settings_import' ? cBase || 'https://chat.lobehub.com' : undefined,
+      launchTemplate: cKind === 'launch_only' && cTemplate ? cTemplate : undefined,
+      browserBased: cBrowser,
+    });
     setAddOpen(false);
     setCName('');
     setCScheme('');
-    setCAuto(false);
+    setCKind('unconfirmed');
+    setCTemplate('');
+    setCBase('');
+    setCBrowser(false);
     setNote('已添加。自定义条目默认标「安装状态无法确认」，这是如实标注。');
     await app.rescanClients();
+  };
+
+  const submitAdapterFeed = async () => {
+    const u = feedUrl.trim();
+    if (!/^https?:\/\//i.test(u)) {
+      setNote('清单地址必须是 http(s)');
+      return;
+    }
+    const next = Array.from(new Set([...app.settings.adapterFeedUrls, u]));
+    await app.patchSettings({ adapterFeedUrls: next });
+    setFeedUrl('');
+    setFeedOpen(false);
+    setNote('已添加适配器清单，正在拉取…');
+    await app.refreshAdapters(true);
   };
 
   const submitFeed = async () => {
@@ -85,7 +117,19 @@ export function SettingsScreen({ navigation }: any) {
         <View style={{ flex: 1 }}>
           <Text numberOfLines={1} style={{ fontSize: sc.fs(13.5), fontWeight: '700', color: palette.ink }}>{c.name}</Text>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sc.s(5), marginTop: sc.s(4) }}>
-            <Chip label={auto ? '可全自动导入' : c.importKind === 'launch_only' ? '仅能打开' : '导入无法确认'} tone={auto ? 'ok' : c.importKind === 'launch_only' ? 'warn' : 'muted'} />
+            <Chip
+              label={
+                c.importKind === 'deeplink_import'
+                  ? '可全自动导入（deep link）'
+                  : c.importKind === 'url_settings_import'
+                    ? '可全自动导入（URL 参数）'
+                    : c.importKind === 'launch_only'
+                      ? '仅能打开'
+                      : '导入无法确认'
+              }
+              tone={auto ? 'ok' : c.importKind === 'launch_only' ? 'warn' : 'muted'}
+            />
+            {c.source === 'feed' ? <Chip label='远程清单' tone='accent' /> : c.source === 'custom' ? <Chip label='自建' tone='muted' /> : null}
             <Chip
               label={c.detected === 'installed' ? '已识别' : c.detected === 'unknown' ? '无法确认' : '未安装'}
               tone={c.detected === 'installed' ? 'accent' : 'muted'}
@@ -93,6 +137,13 @@ export function SettingsScreen({ navigation }: any) {
             {isPref ? <Chip label="默认启动" tone="ok" icon="star" /> : null}
           </View>
           {c.detectReason ? <Text style={{ marginTop: sc.s(3), fontSize: sc.fs(10), color: palette.inkFaint, lineHeight: sc.fs(14) }}>{c.detectReason}</Text> : null}
+          {c.note ? <Text style={{ marginTop: sc.s(3), fontSize: sc.fs(10), color: palette.warn, lineHeight: sc.fs(14) }}>{c.note}</Text> : null}
+          {c.importKind === 'url_settings_import' ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sc.s(6), marginTop: sc.s(5) }}>
+              <Text numberOfLines={1} style={{ flex: 1, fontSize: sc.fs(10.5), color: palette.inkSoft }}>{c.settingsBase || '未设置 base 地址'}</Text>
+              <GlassButton label='改地址' size='sm' tone='muted' onPress={() => setBaseEdit({ id: c.id, value: c.settingsBase || '' })} />
+            </View>
+          ) : null}
         </View>
         <View style={{ gap: sc.s(5) }}>
           <GlassButton label={isPref ? '取消' : '设为默认'} size="sm" tone={isPref ? 'muted' : 'accent'} onPress={() => app.patchSettings({ preferredClientId: isPref ? null : c.id })} />
@@ -154,6 +205,38 @@ export function SettingsScreen({ navigation }: any) {
               <ClientRow key={c.id} c={c} />
             ))}
           </View>
+        </Glass>
+
+        {/* 适配器清单 */}
+        <Glass style={{ marginBottom: sc.s(13) }} pad={sc.s(14)}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: sc.s(6) }}>
+            <Ionicons name="git-branch-outline" size={sc.s(18)} color={palette.accent} />
+            <Text style={{ marginLeft: sc.s(8), flex: 1, fontSize: sc.fs(16), fontWeight: '800', color: palette.ink }}>导入适配器清单</Text>
+            <GlassButton label="立即拉取" icon="cloud-download-outline" size="sm" tone="muted" onPress={() => app.refreshAdapters(true)} />
+          </View>
+          <Text style={{ fontSize: sc.fs(11.5), color: palette.inkFaint, lineHeight: sc.fs(17), marginBottom: sc.s(9) }}>
+            「能不能自动导入」被做成了数据而不是写死的代码。加一个清单地址，GitHub 上新出的开源聊天软件就能在不更新 App 的情况下被支持。清单是公开 JSON，不含任何私有数据。
+          </Text>
+          <View style={{ flexDirection: 'row', gap: sc.s(8), flexWrap: 'wrap' }}>
+            <GlassButton label="添加清单地址" icon="add-outline" size="sm" onPress={() => setAdapterSheetOpen(true)} />
+          </View>
+          {app.settings.adapterFeedUrls.length ? (
+            <View style={{ marginTop: sc.s(9) }}>
+              {app.settings.adapterFeedUrls.map((u) => (
+                <View key={u} style={{ flexDirection: 'row', alignItems: 'center', gap: sc.s(8), paddingVertical: sc.s(7), borderTopWidth: 1, borderTopColor: palette.hairlineSoft }}>
+                  <Text numberOfLines={1} style={{ flex: 1, fontSize: sc.fs(11.5), color: palette.inkSoft }}>{u}</Text>
+                  <IconButton icon="trash-outline" size={15} tone="danger" onPress={() => app.patchSettings({ adapterFeedUrls: app.settings.adapterFeedUrls.filter((x) => x !== u) })} />
+                </View>
+              ))}
+            </View>
+          ) : null}
+          {app.adapterNotes.length ? (
+            <View style={{ marginTop: sc.s(9) }}>
+              {app.adapterNotes.map((t, i) => (
+                <Text key={i} style={{ fontSize: sc.fs(10.5), color: palette.inkFaint, lineHeight: sc.fs(15) }}>· {t}</Text>
+              ))}
+            </View>
+          ) : null}
         </Glass>
 
         {/* 预警阈值 */}
@@ -264,12 +347,39 @@ export function SettingsScreen({ navigation }: any) {
       <Sheet visible={addOpen} onClose={() => setAddOpen(false)} title="手动添加 AI 聊天软件" footer={<GlassButton label="添加" icon="add" size="lg" onPress={submitClient} />}>
         <Field label="软件名称" value={cName} onChangeText={setCName} placeholder="例如：Chatbox" autoCapitalize="words" />
         <Field label="URL Scheme" value={cScheme} onChangeText={setCScheme} placeholder="例如：chatbox" autoCapitalize="none" hint="填 App 的自定义协议名（不含 ://）。留空表示只能靠包名识别。" />
-        <SwitchRow
-          title="它支持 Chatbox 式一键导入协议"
-          desc="只有确认对方支持 import-config deep link 才勾选；勾错会导致导入失败"
-          value={cAuto}
-          onValueChange={setCAuto}
-        />
+        <Text style={{ fontSize: sc.fs(12.5), color: palette.inkSoft, fontWeight: '700', marginBottom: sc.s(7) }}>导入能力</Text>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sc.s(7), marginBottom: sc.s(10) }}>
+          {(['deeplink_import', 'url_settings_import', 'launch_only', 'unconfirmed'] as ChatClient['importKind'][]).map((k) => (
+            <Pressable
+              key={k}
+              onPress={() => setCKind(k)}
+              style={{
+                paddingHorizontal: sc.s(12),
+                paddingVertical: sc.s(8),
+                borderRadius: 999,
+                backgroundColor: cKind === k ? palette.accentSoft : 'rgba(255,255,255,0.7)',
+                borderWidth: 1,
+                borderColor: cKind === k ? palette.accent : palette.hairline,
+              }}
+            >
+              <Text style={{ fontSize: sc.fs(11.5), fontWeight: '800', color: cKind === k ? palette.accent : palette.inkSoft }}>
+                {k === 'deeplink_import' ? 'deep link 直写' : k === 'url_settings_import' ? 'URL 参数写入' : k === 'launch_only' ? '仅能打开' : '无法确认'}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+        {cKind === 'deeplink_import' || cKind === 'url_settings_import' || cKind === 'launch_only' ? (
+          <Field
+            label={cKind === 'launch_only' ? '拉起模板（可选）' : '导入模板'}
+            value={cTemplate}
+            onChangeText={setCTemplate}
+            placeholder={cKind === 'deeplink_import' ? 'chatbox://app/import-config?type={type}&data={data}' : cKind === 'url_settings_import' ? '{base}/?settings={json}' : 'deepchat://start'}
+            autoCapitalize="none"
+            hint={cKind === 'deeplink_import' ? '占位符：{type} 协议类型、{data} base64 配置' : cKind === 'url_settings_import' ? '占位符：{base} 站点地址、{json} URL 编码后的配置' : '占位符：{scheme}'}
+          />
+        ) : null}
+        {cKind === 'url_settings_import' ? <Field label="站点 base 地址" value={cBase} onChangeText={setCBase} placeholder="https://chat.lobehub.com" keyboardType="url" autoCapitalize="none" /> : null}
+        <SwitchRow title="它是网页版 / PWA（走浏览器，无需安装检测）" value={cBrowser} onValueChange={setCBrowser} />
         <Notice tone="muted">
           自定义添加的软件默认标「安装状态无法确认」。原生壳的白名单是在构建期写死的，新加的 Scheme 需要重新构建（npx expo run:android）才能被真实检测到。
         </Notice>
@@ -277,6 +387,29 @@ export function SettingsScreen({ navigation }: any) {
 
       <Sheet visible={feedOpen} onClose={() => setFeedOpen(false)} title="添加情报源" footer={<GlassButton label="添加" icon="add" size="lg" onPress={submitFeed} />}>
         <Field label="情报 JSON 地址" value={feedUrl} onChangeText={setFeedUrl} placeholder="https://example.com/benefits.json" keyboardType="url" autoCapitalize="none" />
+      </Sheet>
+      <Sheet
+        visible={!!baseEdit}
+        onClose={() => setBaseEdit(null)}
+        title="修改 base 地址"
+        footer={
+          <GlassButton
+            label="保存"
+            icon="save-outline"
+            size="lg"
+            onPress={async () => {
+              if (!baseEdit) return;
+              const target = app.clients.find((x) => x.id === baseEdit.id);
+              if (target) await app.updateClient({ ...target, settingsBase: baseEdit.value.trim() || target.settingsBase });
+              setBaseEdit(null);
+            }}
+          />
+        }
+      >
+        <Field label="base 地址" value={baseEdit?.value || ''} onChangeText={(t) => setBaseEdit((b) => (b ? { ...b, value: t } : b))} placeholder="https://your-lobechat.example.com" keyboardType="url" autoCapitalize="none" hint="URL 参数写入会拼在这个地址后面，自建 LobeChat 填自己的域名。" />
+      </Sheet>
+      <Sheet visible={adapterSheetOpen} onClose={() => setAdapterSheetOpen(false)} title="添加适配器清单" footer={<GlassButton label="添加并拉取" icon="cloud-download-outline" size="lg" onPress={submitAdapterFeed} />}>
+        <Field label="清单 JSON 地址" value={feedUrl} onChangeText={setFeedUrl} placeholder="https://raw.githubusercontent.com/你的仓库/main/adapters/clients.json" keyboardType="url" autoCapitalize="none" hint="清单格式见 README「适配器清单」。把仓库传到 GitHub 后，把 raw 地址填进来即可。" />
       </Sheet>
     </ScreenShell>
   );
