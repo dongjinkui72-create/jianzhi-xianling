@@ -1,25 +1,42 @@
 {
   "expo": {
-    "name": "jianzhi-xianling",
+    "name": "剪纸仙灵",
     "slug": "jianzhi-xianling",
     "version": "1.0.0",
+    "scheme": "jianzhi",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-    "ios": {
-      "supportsTablet": true
+    "newArchEnabled": true,
+    "backgroundColor": "#F7FAFF",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#F7FAFF"
     },
     "android": {
+      "package": "com.jianzhi.xianling",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#F7FAFF"
       },
-      "predictiveBackGestureEnabled": false
+      "edgeToEdgeEnabled": true,
+      "permissions": []
     },
-    "web": {
-      "favicon": "./assets/favicon.png"
+    "ios": {
+      "bundleIdentifier": "com.jianzhi.xianling",
+      "supportsTablet": false,
+      "infoPlist": {
+        "UIUserInterfaceStyle": "Light"
+      }
+    },
+    "plugins": [
+      "expo-sqlite",
+      "expo-secure-store",
+      "./plugins/withChatAppQueries"
+    ],
+    "experiments": {
+      "typedRoutes": false
     }
   }
 }

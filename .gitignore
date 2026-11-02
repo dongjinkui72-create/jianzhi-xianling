@@ -39,3 +39,7 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# 本地验证/打包产物
+.tmptest/
+.export-test/
