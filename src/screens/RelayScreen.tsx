@@ -157,7 +157,7 @@ export function RelayScreen() {
       />
 
       <ScrollView
-        contentContainerStyle={{ paddingHorizontal: sc.gutter, paddingBottom: sc.tabHeight + sc.s(30) }}
+        contentContainerStyle={{ paddingHorizontal: sc.gutter, paddingBottom: sc.tabHeight + sc.s(96) }}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >

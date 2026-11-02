@@ -8,16 +8,11 @@ import { palette, radius } from '../theme/tokens';
 import { useScale } from '../theme/useScale';
 import { useApp } from '../store/AppStore';
 import { useLaunch } from '../launch/LaunchProvider';
-import { truncate } from '../lib/format';
 
 /**
  * 底部导航（水晶玻璃）。
- *
- * 布局按迭代要求：[雷达站] [中转站] (圆形启动按钮) [可用池]
- *  - 启动按钮为圆形，位置正好在「中转站」和「可用池」中间
- *  - 面积为标准 FAB 的 2 倍（56 -> 80）
- *  - 底部 UI 比常规更高
- *  - 未选中 API 时按钮为灰色且不可点击
+ * 迭代要求：雷达站 / 中转站 / 可用池 各占底部 UI 的三分之一；
+ * 原来的大圆形启动按钮移除，改为界面上的小型悬浮启动按钮（见 FloatingLaunchButton）。
  */
 
 const ICONS: Record<string, { on: keyof typeof Ionicons.glyphMap; off: keyof typeof Ionicons.glyphMap }> = {
@@ -26,38 +21,61 @@ const ICONS: Record<string, { on: keyof typeof Ionicons.glyphMap; off: keyof typ
   Pool: { on: 'shield-checkmark', off: 'shield-checkmark-outline' },
 };
 
-export function CrystalTabBar({ state, navigation }: BottomTabBarProps) {
+const LABELS: Record<string, string> = { Radar: '雷达站', Relay: '中转站', Pool: '可用池' };
+
+/** 小型悬浮启动按钮：浮在界面右下角、底部导航之上 */
+export function FloatingLaunchButton() {
   const sc = useScale();
   const { keys, selectedKeyId } = useApp();
   const { requestLaunch, launchEnabledReason } = useLaunch();
-
   const selected = keys.find((k) => k.id === selectedKeyId) ?? null;
   const enabled = !!selected && (selected.status === 'ok' || selected.status === 'unknown');
-  const barContentHeight = sc.tabHeight - sc.insets.bottom;
+  const size = sc.s(54);
 
-  const renderTab = (routeIndex: number) => {
-    const route = state.routes[routeIndex];
-    const focused = state.index === routeIndex;
-    const icon = ICONS[route.name] ?? { on: 'ellipse' as const, off: 'ellipse-outline' as const };
-    const label = route.name === 'Radar' ? '雷达站' : route.name === 'Relay' ? '中转站' : '可用池';
-    return (
-      <Pressable
-        key={route.key}
-        onPress={() => {
-          const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
-          if (!focused && !event.defaultPrevented) navigation.navigate(route.name as any);
-        }}
-        style={({ pressed }) => ({ flex: 1, height: barContentHeight, alignItems: 'center', justifyContent: 'center', gap: sc.s(3), opacity: pressed ? 0.65 : 1 })}
-      >
-        <View style={{ alignItems: 'center', justifyContent: 'center', width: sc.s(46), height: sc.s(28), borderRadius: radius.pill, backgroundColor: focused ? palette.accentSoft : 'transparent' }}>
-          <Ionicons name={focused ? icon.on : icon.off} size={sc.s(21)} color={focused ? palette.accent : palette.inkFaint} />
+  return (
+    <View pointerEvents="box-none" style={{ position: 'absolute', right: sc.gutter, bottom: sc.tabHeight + sc.s(116) }}>
+      {!enabled && launchEnabledReason ? (
+        <View pointerEvents="none" style={{ position: 'absolute', right: 0, bottom: size + sc.s(8), width: sc.s(168), alignItems: 'flex-end' }}>
+          <View style={{ paddingHorizontal: sc.s(10), paddingVertical: sc.s(6), borderRadius: radius.md, backgroundColor: 'rgba(255,255,255,0.94)', borderWidth: 1, borderColor: palette.hairline }}>
+            <Text style={{ fontSize: sc.fs(10.5), color: palette.inkSoft, fontWeight: '600', textAlign: 'right', lineHeight: sc.fs(15) }}>{launchEnabledReason}</Text>
+          </View>
         </View>
-        <Text style={{ fontSize: sc.fs(11), fontWeight: focused ? '800' : '600', color: focused ? palette.accent : palette.inkFaint, letterSpacing: 0.3 }}>
-          {label}
-        </Text>
+      ) : null}
+      <Pressable
+        disabled={!enabled}
+        onPress={() => requestLaunch()}
+        accessibilityLabel="启动并自动导入"
+        hitSlop={8}
+        style={({ pressed }) => ({
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          alignItems: 'center',
+          justifyContent: 'center',
+          overflow: 'hidden',
+          opacity: pressed && enabled ? 0.85 : 1,
+          transform: [{ scale: pressed && enabled ? 0.94 : 1 }],
+          backgroundColor: enabled ? 'transparent' : 'rgba(255,255,255,0.72)',
+          borderWidth: enabled ? 0 : 1.5,
+          borderColor: enabled ? 'transparent' : 'rgba(146,160,180,0.4)',
+          ...(enabled
+            ? ({ shadowColor: '#2E7BFF', shadowOpacity: 0.4, shadowRadius: 16, shadowOffset: { width: 0, height: 7 }, elevation: 10 } as any)
+            : ({ shadowColor: '#4A6C9B', shadowOpacity: 0.12, shadowRadius: 8, shadowOffset: { width: 0, height: 4 }, elevation: 4 } as any)),
+        })}
+      >
+        {enabled ? (
+          <LinearGradient colors={[palette.accent, '#5FA0FF', palette.accentDeep]} start={{ x: 0.1, y: 0 }} end={{ x: 0.9, y: 1 }} style={StyleSheet.absoluteFill} />
+        ) : null}
+        <View pointerEvents="none" style={{ position: 'absolute', top: sc.s(5), left: sc.s(11), right: sc.s(11), height: sc.s(11), borderRadius: sc.s(8), backgroundColor: 'rgba(255,255,255,0.32)' }} />
+        <Ionicons name="play" size={sc.s(23)} color={enabled ? '#FFFFFF' : palette.disabledInk} style={{ marginLeft: sc.s(2) }} />
       </Pressable>
-    );
-  };
+    </View>
+  );
+}
+
+export function CrystalTabBar({ state, navigation }: BottomTabBarProps) {
+  const sc = useScale();
+  const barContentHeight = sc.tabHeight - sc.insets.bottom;
 
   return (
     <View pointerEvents="box-none" style={{ position: 'absolute', left: 0, right: 0, bottom: 0 }}>
@@ -88,75 +106,40 @@ export function CrystalTabBar({ state, navigation }: BottomTabBarProps) {
         <View pointerEvents="none" style={{ position: 'absolute', top: 0, left: sc.s(30), right: sc.s(30), height: 1, backgroundColor: palette.edge }} />
       </View>
 
-      {/* 内容行 */}
+      {/* 三个入口各占三分之一 */}
       <View pointerEvents="box-none" style={{ position: 'absolute', top: 0, left: 0, right: 0, height: barContentHeight, flexDirection: 'row', alignItems: 'center' }}>
-        {renderTab(0)}
-        {renderTab(1)}
-
-        {/* 圆形启动按钮：夹在「中转站」与「可用池」中间 */}
-        <View style={{ width: sc.fabSize + sc.s(10), alignItems: 'center', justifyContent: 'center' }}>
-          <Pressable
-            disabled={!enabled}
-            onPress={() => requestLaunch()}
-            hitSlop={6}
-            style={({ pressed }) => ({
-              width: sc.fabSize,
-              height: sc.fabSize,
-              borderRadius: sc.fabSize / 2,
-              alignItems: 'center',
-              justifyContent: 'center',
-              overflow: 'hidden',
-              transform: [{ translateY: -sc.fabSize * 0.30 }, { scale: pressed && enabled ? 0.955 : 1 }],
-              opacity: enabled ? 1 : 0.95,
-              backgroundColor: enabled ? 'transparent' : palette.disabledFill,
-              borderWidth: enabled ? 0 : 1.5,
-              borderColor: enabled ? 'transparent' : 'rgba(146,160,180,0.35)',
-              ...(enabled
-                ? ({
-                    shadowColor: '#2E7BFF',
-                    shadowOpacity: 0.44,
-                    shadowRadius: 22,
-                    shadowOffset: { width: 0, height: 10 },
-                    elevation: 16,
-                  } as any)
-                : ({
-                    shadowColor: '#4A6C9B',
-                    shadowOpacity: 0.1,
-                    shadowRadius: 6,
-                    shadowOffset: { width: 0, height: 3 },
-                    elevation: 2,
-                  } as any)),
-            })}
-          >
-            {enabled ? (
-              <LinearGradient
-                colors={[palette.accent, '#5FA0FF', palette.accentDeep]}
-                start={{ x: 0.1, y: 0 }}
-                end={{ x: 0.9, y: 1 }}
-                style={StyleSheet.absoluteFill}
-              />
-            ) : null}
-            <View pointerEvents="none" style={{ position: 'absolute', top: sc.s(6), left: sc.s(14), right: sc.s(14), height: sc.s(14), borderRadius: sc.s(10), backgroundColor: 'rgba(255,255,255,0.35)' }} />
-            <Ionicons name={enabled ? 'play' : 'play'} size={sc.s(enabled ? 34 : 30)} color={enabled ? '#FFFFFF' : palette.disabledInk} style={{ marginLeft: enabled ? sc.s(3) : 0 }} />
-            {enabled ? (
-              <Text numberOfLines={1} style={{ position: 'absolute', bottom: sc.s(11), fontSize: sc.fs(9.5), color: 'rgba(255,255,255,0.94)', fontWeight: '800', maxWidth: sc.fabSize - sc.s(14), textAlign: 'center' }}>
-                {selected ? truncate(selected.label, 6) : '启动'}
+        {state.routes.map((route, index) => {
+          const focused = state.index === index;
+          const icon = ICONS[route.name] ?? { on: 'ellipse' as const, off: 'ellipse-outline' as const };
+          return (
+            <Pressable
+              key={route.key}
+              onPress={() => {
+                const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
+                if (!focused && !event.defaultPrevented) navigation.navigate(route.name as any);
+              }}
+              style={({ pressed }) => ({
+                flex: 1,
+                height: barContentHeight,
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: sc.s(3),
+                opacity: pressed ? 0.65 : 1,
+              })}
+            >
+              <View style={{ alignItems: 'center', justifyContent: 'center', width: sc.s(52), height: sc.s(28), borderRadius: radius.pill, backgroundColor: focused ? palette.accentSoft : 'transparent' }}>
+                <Ionicons name={focused ? icon.on : icon.off} size={sc.s(21)} color={focused ? palette.accent : palette.inkFaint} />
+              </View>
+              <Text numberOfLines={1} style={{ fontSize: sc.fs(11.5), fontWeight: focused ? '800' : '600', color: focused ? palette.accent : palette.inkFaint, letterSpacing: 0.3 }}>
+                {LABELS[route.name] ?? route.name}
               </Text>
-            ) : null}
-          </Pressable>
-        </View>
-
-        {renderTab(2)}
+            </Pressable>
+          );
+        })}
       </View>
 
-      {/* 不可点时的原因提示（悬浮在按钮上方，不占布局） */}
-      {!enabled && launchEnabledReason ? (
-        <View pointerEvents="none" style={{ position: 'absolute', left: 0, right: 0, bottom: barContentHeight + sc.s(6), alignItems: 'center' }}>
-          <View style={{ paddingHorizontal: sc.s(12), paddingVertical: sc.s(6), borderRadius: radius.pill, backgroundColor: 'rgba(255,255,255,0.92)', borderWidth: 1, borderColor: palette.hairline }}>
-            <Text style={{ fontSize: sc.fs(11), color: palette.inkSoft, fontWeight: '600' }}>{launchEnabledReason}</Text>
-          </View>
-        </View>
-      ) : null}
+      {/* 悬浮启动按钮（浮在界面之上） */}
+      <FloatingLaunchButton />
     </View>
   );
 }

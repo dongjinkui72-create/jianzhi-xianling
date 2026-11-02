@@ -55,7 +55,7 @@ export function lobeProviderFor(protocol: ApiProtocol): string {
   }
 }
 
-export function canAutoImport(c: ChatClient): boolean {
+export function canAutoImport(c: Pick<ChatClient, 'importKind' | 'importTemplate' | 'settingsTemplate'>): boolean {
   if (c.importKind === 'deeplink_import') return !!c.importTemplate;
   if (c.importKind === 'url_settings_import') return !!c.settingsTemplate;
   return false;

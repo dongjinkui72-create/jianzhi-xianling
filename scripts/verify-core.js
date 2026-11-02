@@ -228,6 +228,31 @@ t('仓库自带 adapters/clients.json 合法且与内置一致', () => {
     if (a.importKind === 'unconfirmed') assert.ok(!a.importTemplate && !a.settingsTemplate, a.id);
   }
 });
+console.log('\n[9] 可用池三分组与可导入过滤');
+const G = require(path.join(base, 'lib', 'poolGroups.js'));
+const mk = (status) => ({ id: 'k-' + status, relayId: null, label: status, maskedKey: 'sk-x', secretRef: 'r', baseUrl: 'https://x/v1', provider: 'p', protocol: 'openai_compatible', status, remainingTokens: 1000, remainingUsd: 1, statusNote: null, checkedAt: 1, source: 'auto', createdAt: 1 });
+t('绿/黄/红三分组归位正确', () => {
+  const g = G.groupKeys([mk('ok'), mk('unknown'), mk('low'), mk('dead')]);
+  assert.strictEqual(g.green.length, 2);
+  assert.strictEqual(g.yellow.length, 1);
+  assert.strictEqual(g.red.length, 1);
+  assert.strictEqual(g.yellow[0].status, 'low');
+  assert.strictEqual(g.red[0].status, 'dead');
+});
+t('只有绿色分组可选中启动', () => {
+  assert.strictEqual(G.isSelectable(mk('ok')), true);
+  assert.strictEqual(G.isSelectable(mk('unknown')), true);
+  assert.strictEqual(G.isSelectable(mk('low')), false);
+  assert.strictEqual(G.isSelectable(mk('dead')), false);
+});
+t('设置页/启动流程只保留可导入软件（大厂官方 App 被排除）', () => {
+  const importable = REG.CHAT_APP_REGISTRY.filter((c) => I.canAutoImport(c));
+  const ids = importable.map((c) => c.id);
+  assert.ok(ids.includes('chatbox') && ids.includes('lobechat'), '应包含 chatbox 与 lobechat');
+  for (const banned of ['chatgpt', 'claude', 'gemini', 'deepseek', 'doubao', 'grok', 'poe']) {
+    assert.ok(!ids.includes(banned), banned + ' 不应出现在可导入列表');
+  }
+});
 console.log('\n────────────────────────────');
 console.log(`通过 ${pass} 项，失败 ${fail} 项`);
 if (fail) process.exit(1);

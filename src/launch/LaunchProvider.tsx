@@ -62,8 +62,12 @@ export function LaunchProvider({ children }: { children: React.ReactNode }) {
 
   /** 候选：优先能全自动导入的，其次已识别安装的，最后是「无法确认」的 */
   const candidates = useMemo(() => {
+    // 只把「能把密钥全自动写进去」的软件当作候选；不可导入的官方 App 不参与启动流程
     const usable = app.clients.filter(
-      (c) => (c.browserBased || c.detected !== 'not_installed') && (c.platform === 'all' || c.platform === Platform.OS),
+      (c) =>
+        canAutoImport(c) &&
+        (c.browserBased || c.detected !== 'not_installed') &&
+        (c.platform === 'all' || c.platform === Platform.OS),
     );
     const rank = (c: ChatClient) => (canAutoImport(c) ? 0 : c.detected === 'installed' ? 1 : 2);
     return [...usable].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
@@ -179,7 +183,7 @@ export function LaunchProvider({ children }: { children: React.ReactNode }) {
         footer={<GlassButton label="去设置里手动添加" icon="add-circle-outline" onPress={() => { setNoAppOpen(false); navigationRef.isReady() && navigationRef.navigate('Settings' as never); }} size="lg" />}
       >
         <Notice tone="warn" title="需要手动添加">
-          本机扫描没有找到可用的 AI 聊天软件。可能是尚未安装，也可能是当前运行环境无法扩展原生壳的 Scheme 白名单，导致结果「无法确认」。请到「设置 → AI 聊天软件」里手动添加，或先安装 Chatbox（本 App 已内置其官方一键导入协议）。
+          本机扫描没有找到「可全自动导入」的 AI 聊天软件。ChatGPT / Claude / Gemini / 豆包这类官方 App 不接受第三方密钥，本来就不在可导入范围内。请到「设置 → 从已安装应用添加」里挑一个开源客户端，或先安装 Chatbox（本 App 已内置其官方一键导入协议）。
         </Notice>
         <View style={{ height: sc.s(10) }} />
         <GlassButton label="重新扫描一次" icon="refresh-outline" onPress={async () => { setNoAppOpen(false); await app.rescanClients(); }} />
