@@ -91,7 +91,7 @@ function Group({ title, tone, count, hint, children }: { title: string; tone: 'o
           <Text style={{ fontSize: sc.fs(14.5), fontWeight: '800', color }}>{title}</Text>
           <Text numberOfLines={1} style={{ marginTop: sc.s(2), fontSize: sc.fs(10.5), color: palette.inkFaint }}>{hint}</Text>
         </View>
-        <View style={{ paddingHorizontal: sc.s(9), paddingVertical: sc.s(3), borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.85)', borderWidth: 1, borderColor: palette.hairline }}>
+        <View style={{ paddingHorizontal: sc.s(9), paddingVertical: sc.s(3), borderRadius: 999, backgroundColor: palette.chipBg, borderWidth: 1, borderColor: palette.hairline }}>
           <Text style={{ fontSize: sc.fs(11), fontWeight: '800', color: palette.inkSoft }}>{count}</Text>
         </View>
         <View style={{ width: sc.s(30), height: sc.s(30), borderRadius: sc.s(15), backgroundColor: 'rgba(255,255,255,0.85)', borderWidth: 1, borderColor: palette.hairline, alignItems: 'center', justifyContent: 'center' }}>

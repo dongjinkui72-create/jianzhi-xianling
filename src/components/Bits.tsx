@@ -8,17 +8,20 @@ import { useKeyboardHeight } from '../theme/useKeyboard';
 
 export type Tone = 'ok' | 'warn' | 'danger' | 'accent' | 'muted';
 
-const TONE_COLORS: Record<Tone, { fg: string; bg: string }> = {
-  ok: { fg: palette.ok, bg: palette.okSoft },
-  warn: { fg: palette.warn, bg: palette.warnSoft },
-  danger: { fg: palette.danger, bg: palette.dangerSoft },
-  accent: { fg: palette.accent, bg: palette.accentSoft },
-  muted: { fg: palette.inkSoft, bg: 'rgba(122,144,178,0.12)' },
-};
+/** 每次调用现取 palette，主题切换后立即生效 */
+function toneColors(): Record<Tone, { fg: string; bg: string }> {
+  return {
+    ok: { fg: palette.ok, bg: palette.okSoft },
+    warn: { fg: palette.warn, bg: palette.warnSoft },
+    danger: { fg: palette.danger, bg: palette.dangerSoft },
+    accent: { fg: palette.accent, bg: palette.accentSoft },
+    muted: { fg: palette.inkSoft, bg: palette.chipBg },
+  };
+}
 
 export function Chip({ label, tone = 'muted', icon }: { label: string; tone?: Tone; icon?: keyof typeof Ionicons.glyphMap }) {
   const sc = useScale();
-  const c = TONE_COLORS[tone];
+  const c = toneColors()[tone];
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: sc.s(4), paddingHorizontal: sc.s(9), paddingVertical: sc.s(4), borderRadius: radius.pill, backgroundColor: c.bg, alignSelf: 'flex-start' }}>
       {icon ? <Ionicons name={icon} size={sc.s(12)} color={c.fg} /> : null}
@@ -32,7 +35,7 @@ export function Chip({ label, tone = 'muted', icon }: { label: string; tone?: To
 export function StatusDot({ tone, size }: { tone: Tone; size?: number }) {
   const sc = useScale();
   const d = size ?? sc.s(9);
-  return <View style={{ width: d, height: d, borderRadius: d / 2, backgroundColor: TONE_COLORS[tone].fg }} />;
+  return <View style={{ width: d, height: d, borderRadius: d / 2, backgroundColor: toneColors()[tone].fg }} />;
 }
 
 export function Divider({ style }: { style?: StyleProp<ViewStyle> }) {
@@ -59,7 +62,7 @@ export function SectionLabel({ title, right, hint }: { title: string; right?: Re
 export function IconButton({ icon, onPress, tone = 'accent', size = 20, disabled, badge }: { icon: keyof typeof Ionicons.glyphMap; onPress?: () => void; tone?: Tone; size?: number; disabled?: boolean; badge?: string | null }) {
   const sc = useScale();
   const d = sc.s(40);
-  const c = TONE_COLORS[tone];
+  const c = toneColors()[tone];
   return (
     <Pressable
       onPress={onPress}
@@ -70,7 +73,7 @@ export function IconButton({ icon, onPress, tone = 'accent', size = 20, disabled
         borderRadius: d / 2,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: disabled ? palette.disabledFill : 'rgba(255,255,255,0.82)',
+        backgroundColor: disabled ? palette.disabledFill : palette.chipBg,
         borderWidth: 1,
         borderColor: disabled ? 'transparent' : palette.hairline,
         opacity: pressed ? 0.75 : 1,
@@ -89,7 +92,7 @@ export function IconButton({ icon, onPress, tone = 'accent', size = 20, disabled
 
 export function GlassButton({ label, icon, onPress, tone = 'accent', disabled, loading, style, size = 'md' }: { label: string; icon?: keyof typeof Ionicons.glyphMap; onPress?: () => void; tone?: Tone; disabled?: boolean; loading?: boolean; style?: StyleProp<ViewStyle>; size?: 'sm' | 'md' | 'lg' }) {
   const sc = useScale();
-  const c = TONE_COLORS[tone];
+  const c = toneColors()[tone];
   const padV = size === 'sm' ? sc.s(8) : size === 'lg' ? sc.s(15) : sc.s(12);
   const fontSize = size === 'sm' ? sc.fs(12.5) : size === 'lg' ? sc.fs(16) : sc.fs(14);
   return (
@@ -127,7 +130,7 @@ export function Field({ label, value, onChangeText, placeholder, multiline, secu
           {right}
         </View>
       ) : null}
-      <View style={{ borderRadius: radius.md, borderWidth: 1, borderColor: palette.hairline, backgroundColor: 'rgba(255,255,255,0.78)', paddingHorizontal: sc.s(12), paddingVertical: multiline ? sc.s(8) : 0, minHeight: multiline ? sc.s(84) : sc.s(46), justifyContent: 'center' }}>
+      <View style={{ borderRadius: radius.md, borderWidth: 1, borderColor: palette.hairline, backgroundColor: palette.inputBg, paddingHorizontal: sc.s(12), paddingVertical: multiline ? sc.s(8) : 0, minHeight: multiline ? sc.s(84) : sc.s(46), justifyContent: 'center' }}>
         <TextInput
           value={value}
           onChangeText={onChangeText}
@@ -183,7 +186,7 @@ export function EmptyState({ icon = 'sparkles-outline', title, desc, action }: {
 
 export function Notice({ tone = 'muted', title, children }: { tone?: Tone; title?: string; children?: React.ReactNode }) {
   const sc = useScale();
-  const c = TONE_COLORS[tone];
+  const c = toneColors()[tone];
   return (
     <View style={{ flexDirection: 'row', gap: sc.s(9), backgroundColor: c.bg, borderRadius: radius.md, padding: sc.s(12), borderWidth: 1, borderColor: `${c.fg}33` }}>
       <Ionicons name={tone === 'danger' ? 'alert-circle' : tone === 'warn' ? 'warning' : tone === 'ok' ? 'checkmark-circle' : 'information-circle'} size={sc.s(17)} color={c.fg} style={{ marginTop: sc.s(1) }} />
@@ -203,7 +206,7 @@ export function Sheet({ visible, onClose, title, children, footer, maxHeightRati
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
       <View style={{ flex: 1, backgroundColor: 'rgba(13,27,42,0.34)', justifyContent: 'flex-end' }}>
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
-        <View style={{ maxHeight: sc.height * maxHeightRatio, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, overflow: 'hidden', backgroundColor: 'rgba(250,252,255,0.98)', borderWidth: 1, borderColor: palette.edge, marginBottom: kb, ...(shadow.card as any) }}>
+        <View style={{ maxHeight: sc.height * maxHeightRatio, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, overflow: 'hidden', backgroundColor: palette.sheetBg, borderWidth: 1, borderColor: palette.edge, marginBottom: kb, ...(shadow.card as any) }}>
           <View style={{ alignItems: 'center', paddingTop: sc.s(9), paddingBottom: sc.s(4) }}>
             <View style={{ width: sc.s(38), height: sc.s(4.5), borderRadius: sc.s(3), backgroundColor: 'rgba(122,144,178,0.34)' }} />
           </View>

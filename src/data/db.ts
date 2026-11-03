@@ -215,6 +215,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   lastRadarFetchAt: null,
   lastAdapterFetchAt: null,
   announcementSeen: null,
+  theme: 'crystal',
 };
 
 export async function loadSettings(): Promise<AppSettings> {

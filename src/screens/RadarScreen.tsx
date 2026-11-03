@@ -60,7 +60,7 @@ function GroupHeader({ title, count, accent }: { title: string; count: number; a
       <Text numberOfLines={1} style={{ flex: 1, fontSize: sc.fs(15), fontWeight: '800', color: palette.ink }}>
         {title}
       </Text>
-      <View style={{ paddingHorizontal: sc.s(8), paddingVertical: sc.s(2), borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.85)', borderWidth: 1, borderColor: palette.hairline }}>
+      <View style={{ paddingHorizontal: sc.s(8), paddingVertical: sc.s(2), borderRadius: 999, backgroundColor: palette.chipBg, borderWidth: 1, borderColor: palette.hairline }}>
         <Text style={{ fontSize: sc.fs(10.5), fontWeight: '800', color: palette.inkSoft }}>{count}</Text>
       </View>
     </View>

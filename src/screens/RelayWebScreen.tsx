@@ -262,7 +262,7 @@ export function RelayWebScreen({ route, navigation }: any) {
 
   return (
     <View style={{ flex: 1, backgroundColor: palette.bgTop }}>
-      <View style={{ paddingTop: insets.top + sc.s(6), paddingHorizontal: sc.gutter, paddingBottom: sc.s(10), backgroundColor: 'rgba(255,255,255,0.86)', borderBottomWidth: 1, borderBottomColor: palette.hairline }}>
+      <View style={{ paddingTop: insets.top + sc.s(6), paddingHorizontal: sc.gutter, paddingBottom: sc.s(10), backgroundColor: palette.barTop, borderBottomWidth: 1, borderBottomColor: palette.hairline }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sc.s(9) }}>
           <IconButton icon="chevron-back" onPress={() => navigation.goBack()} tone="muted" />
           <View style={{ flex: 1 }}>
@@ -271,7 +271,7 @@ export function RelayWebScreen({ route, navigation }: any) {
           <IconButton icon={loading ? 'hourglass-outline' : 'refresh'} onPress={() => webRef.current?.reload()} tone="accent" />
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sc.s(8), marginTop: sc.s(9) }}>
-          <View style={{ flex: 1, height: sc.s(40), flexDirection: 'row', alignItems: 'center', paddingHorizontal: sc.s(11), borderRadius: radius.pill, backgroundColor: 'rgba(255,255,255,0.9)', borderWidth: 1, borderColor: palette.hairline }}>
+          <View style={{ flex: 1, height: sc.s(40), flexDirection: 'row', alignItems: 'center', paddingHorizontal: sc.s(11), borderRadius: radius.pill, backgroundColor: palette.inputBg, borderWidth: 1, borderColor: palette.hairline }}>
             <Ionicons name="link-outline" size={sc.s(14)} color={palette.inkFaint} />
             <TextInput
               value={inputUrl}
@@ -344,7 +344,7 @@ export function RelayWebScreen({ route, navigation }: any) {
         </View>
       ) : null}
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <View style={{ paddingHorizontal: sc.gutter, paddingTop: sc.s(10), paddingBottom: insets.bottom + sc.s(12) + kb, backgroundColor: 'rgba(250,252,255,0.97)', borderTopWidth: 1, borderTopColor: palette.hairline, flexDirection: 'row', gap: sc.s(9) }}>
+        <View style={{ paddingHorizontal: sc.gutter, paddingTop: sc.s(10), paddingBottom: insets.bottom + sc.s(12) + kb, backgroundColor: palette.sheetBg, borderTopWidth: 1, borderTopColor: palette.hairline, flexDirection: 'row', gap: sc.s(9) }}>
           <View style={{ flex: 1 }}>
             <GlassButton label="手动粘贴密钥" icon="key-outline" tone="muted" size="lg" onPress={() => setPasteOpen(true)} style={{ width: '100%' } as any} />
           </View>

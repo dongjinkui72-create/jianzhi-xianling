@@ -6,7 +6,8 @@ import { Busy, Chip, Collapsible, Field, GlassButton, IconButton, KeyValue, Noti
 import { Glass } from '../components/Glass';
 import { Header, ScreenShell } from '../components/Screen';
 import { compactNumber } from '../lib/format';
-import { palette } from '../theme/tokens';
+import { palette, type ThemeName } from '../theme/tokens';
+import { useThemeName } from '../theme/ThemeProvider';
 import { useScale } from '../theme/useScale';
 import { canAutoImport } from '../services/launcher';
 import { isWhitelistCapableShell } from '../services/detectApps';
@@ -35,6 +36,7 @@ export function SettingsScreen({ navigation }: any) {
   const [note, setNote] = useState<string | null>(null);
   const [baseEdit, setBaseEdit] = useState<{ id: string; value: string } | null>(null);
   const [q, setQ] = useState('');
+  const theme = useThemeName();
 
   /** 只保留可导入的适配器 */
   const importable = app.clients.filter((c) => canAutoImport(c));
@@ -215,6 +217,45 @@ export function SettingsScreen({ navigation }: any) {
             {importable.length === 0 ? (
               <Text style={{ fontSize: sc.fs(12), color: palette.inkFaint, paddingVertical: sc.s(10) }}>还没有可导入的软件。点「从已安装应用添加」，或先安装 Chatbox。</Text>
             ) : null}
+          </View>
+        </Glass>
+
+        {/* 外观：仅两个主题，iOS 同款玻璃质感 */}
+        <Glass style={{ marginBottom: sc.s(13) }} pad={sc.s(14)}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: sc.s(10) }}>
+            <Ionicons name="color-palette-outline" size={sc.s(18)} color={palette.accent} />
+            <Text style={{ marginLeft: sc.s(8), flex: 1, fontSize: sc.fs(16), fontWeight: '800', color: palette.ink }}>外观</Text>
+          </View>
+          <View style={{ flexDirection: 'row', gap: sc.s(10) }}>
+            {(['crystal', 'dark'] as ThemeName[]).map((t) => {
+              const active = theme === t;
+              const dark = t === 'dark';
+              return (
+                <Pressable
+                  key={t}
+                  onPress={() => app.patchSettings({ theme: t })}
+                  style={{
+                    flex: 1,
+                    borderRadius: sc.s(18),
+                    borderWidth: active ? 2 : 1,
+                    borderColor: active ? palette.accent : palette.hairline,
+                    overflow: 'hidden',
+                    backgroundColor: dark ? '#0B1220' : '#F4F8FE',
+                  }}
+                >
+                  <View style={{ height: sc.s(66), alignItems: 'center', justifyContent: 'center', gap: sc.s(6), backgroundColor: dark ? '#0B1220' : '#EDF3FB' }}>
+                    <View style={{ width: sc.s(52), height: sc.s(20), borderRadius: sc.s(8), backgroundColor: dark ? 'rgba(77,154,255,0.22)' : 'rgba(255,255,255,0.92)', borderWidth: 1, borderColor: dark ? 'rgba(255,255,255,0.16)' : 'rgba(122,144,178,0.28)' }} />
+                    <View style={{ width: sc.s(52), height: sc.s(20), borderRadius: sc.s(8), backgroundColor: dark ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.66)', borderWidth: 1, borderColor: dark ? 'rgba(255,255,255,0.12)' : 'rgba(122,144,178,0.22)' }} />
+                  </View>
+                  <View style={{ padding: sc.s(10), flexDirection: 'row', alignItems: 'center', gap: sc.s(6) }}>
+                    <Ionicons name={active ? 'checkmark-circle' : 'ellipse-outline'} size={sc.s(15)} color={active ? palette.accent : palette.inkFaint} />
+                    <Text style={{ fontSize: sc.fs(13), fontWeight: '800', color: dark ? '#EAF2FF' : palette.ink }}>
+                      {dark ? '黑夜玻璃' : '水晶白玻璃'}
+                    </Text>
+                  </View>
+                </Pressable>
+              );
+            })}
           </View>
         </Glass>
 

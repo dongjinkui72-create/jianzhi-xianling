@@ -23,10 +23,12 @@ export interface GlassProps {
   danger?: boolean;
 }
 
-const TONES: Record<string, [string, string, string]> = {
-  soft: ['rgba(255,255,255,0.62)', 'rgba(255,255,255,0.40)', 'rgba(255,255,255,0.55)'],
-  default: ['rgba(255,255,255,0.90)', 'rgba(255,255,255,0.62)', 'rgba(255,255,255,0.80)'],
-  strong: ['rgba(255,255,255,0.98)', 'rgba(255,255,255,0.86)', 'rgba(255,255,255,0.94)'],
+import { glassTones, glassTonesSoft, glassTonesStrong } from '../theme/tokens';
+
+const TONE_FN: Record<string, () => [string, string, string]> = {
+  soft: glassTonesSoft,
+  default: glassTones,
+  strong: glassTonesStrong,
 };
 
 export function Glass({
@@ -49,13 +51,13 @@ export function Glass({
   const body = (
     <>
       <LinearGradient
-        colors={TONES[tone] ?? TONES.default}
+        colors={(TONE_FN[tone] ?? TONE_FN.default)()}
         start={{ x: 0.1, y: 0 }}
         end={{ x: 0.9, y: 1 }}
         style={StyleSheet.absoluteFill}
       />
       <View pointerEvents="none" style={{ position: 'absolute', top: 0, left: r * 0.5, right: r * 0.5, height: 1, backgroundColor: palette.edge, opacity: 0.95 }} />
-      <View pointerEvents="none" style={{ position: 'absolute', top: -sc.s(40), right: -sc.s(30), width: sc.s(120), height: sc.s(120), borderRadius: sc.s(60), backgroundColor: 'rgba(255,255,255,0.55)' }} />
+      <View pointerEvents="none" style={{ position: 'absolute', top: -sc.s(40), right: -sc.s(30), width: sc.s(120), height: sc.s(120), borderRadius: sc.s(60), backgroundColor: palette.glow }} />
       <View style={{ padding }}>{children}</View>
     </>
   );
@@ -65,7 +67,7 @@ export function Glass({
     borderWidth: selected ? 1.6 : 1,
     borderColor: border,
     overflow: 'hidden',
-    backgroundColor: 'rgba(255,255,255,0.35)',
+    backgroundColor: palette.glassSoft,
     ...(elevated ? (shadow.card as any) : null),
   };
 

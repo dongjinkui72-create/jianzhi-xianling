@@ -4,7 +4,7 @@ import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
-import { palette, radius } from '../theme/tokens';
+import { currentThemeName, palette, radius } from '../theme/tokens';
 import { useScale } from '../theme/useScale';
 import { useApp } from '../store/AppStore';
 import { useLaunch } from '../launch/LaunchProvider';
@@ -55,7 +55,7 @@ export function FloatingLaunchButton() {
           overflow: 'hidden',
           opacity: pressed && enabled ? 0.85 : 1,
           transform: [{ scale: pressed && enabled ? 0.94 : 1 }],
-          backgroundColor: enabled ? 'transparent' : 'rgba(255,255,255,0.72)',
+          backgroundColor: enabled ? 'transparent' : palette.glassStrong,
           borderWidth: enabled ? 0 : 1.5,
           borderColor: enabled ? 'transparent' : 'rgba(146,160,180,0.4)',
           ...(enabled
@@ -66,7 +66,7 @@ export function FloatingLaunchButton() {
         {enabled ? (
           <LinearGradient colors={[palette.accent, '#5FA0FF', palette.accentDeep]} start={{ x: 0.1, y: 0 }} end={{ x: 0.9, y: 1 }} style={StyleSheet.absoluteFill} />
         ) : null}
-        <View pointerEvents="none" style={{ position: 'absolute', top: sc.s(5), left: sc.s(11), right: sc.s(11), height: sc.s(11), borderRadius: sc.s(8), backgroundColor: 'rgba(255,255,255,0.32)' }} />
+        <View pointerEvents="none" style={{ position: 'absolute', top: sc.s(5), left: sc.s(11), right: sc.s(11), height: sc.s(11), borderRadius: sc.s(8), backgroundColor: 'rgba(255,255,255,0.28)' }} />
         <Ionicons name="play" size={sc.s(23)} color={enabled ? '#FFFFFF' : palette.disabledInk} style={{ marginLeft: sc.s(2) }} />
       </Pressable>
     </View>
@@ -86,7 +86,7 @@ export function CrystalTabBar({ state, navigation }: BottomTabBarProps) {
           borderTopLeftRadius: sc.s(28),
           borderTopRightRadius: sc.s(28),
           overflow: 'hidden',
-          backgroundColor: Platform.OS === 'ios' ? 'transparent' : 'rgba(255,255,255,0.90)',
+          backgroundColor: Platform.OS === 'ios' ? 'transparent' : palette.barBottom,
           borderTopWidth: 1,
           borderColor: palette.edge,
           elevation: 14,
@@ -97,11 +97,11 @@ export function CrystalTabBar({ state, navigation }: BottomTabBarProps) {
         }}
       >
         {Platform.OS === 'ios' ? (
-          <BlurView intensity={72} tint="light" style={StyleSheet.absoluteFill} experimentalBlurMethod="dimezisBlurView">
-            <LinearGradient colors={['rgba(255,255,255,0.55)', 'rgba(255,255,255,0.30)']} style={StyleSheet.absoluteFill} />
+          <BlurView intensity={72} tint={(currentThemeName() === 'dark' ? 'dark' : 'light') as any} style={StyleSheet.absoluteFill} experimentalBlurMethod="dimezisBlurView">
+            <LinearGradient colors={[palette.glassSoft, palette.glass]} style={StyleSheet.absoluteFill} />
           </BlurView>
         ) : (
-          <LinearGradient colors={['rgba(255,255,255,0.96)', 'rgba(255,255,255,0.80)']} style={StyleSheet.absoluteFill} />
+          <LinearGradient colors={[palette.barTop, palette.barBottom]} style={StyleSheet.absoluteFill} />
         )}
         <View pointerEvents="none" style={{ position: 'absolute', top: 0, left: sc.s(30), right: sc.s(30), height: 1, backgroundColor: palette.edge }} />
       </View>

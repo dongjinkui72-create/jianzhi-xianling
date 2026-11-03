@@ -17,8 +17,8 @@ export function ScreenShell({ children, edges = ['top'], style }: { children: Re
         end={{ x: 0.8, y: 1 }}
         style={StyleSheet.absoluteFill}
       />
-      <View pointerEvents="none" style={{ position: 'absolute', top: -sc.s(90), left: -sc.s(70), width: sc.s(260), height: sc.s(260), borderRadius: sc.s(130), backgroundColor: 'rgba(255,255,255,0.60)' }} />
-      <View pointerEvents="none" style={{ position: 'absolute', top: sc.s(150), right: -sc.s(110), width: sc.s(230), height: sc.s(230), borderRadius: sc.s(115), backgroundColor: 'rgba(255,255,255,0.42)' }} />
+      <View pointerEvents="none" style={{ position: 'absolute', top: -sc.s(90), left: -sc.s(70), width: sc.s(260), height: sc.s(260), borderRadius: sc.s(130), backgroundColor: palette.glow }} />
+      <View pointerEvents="none" style={{ position: 'absolute', top: sc.s(150), right: -sc.s(110), width: sc.s(230), height: sc.s(230), borderRadius: sc.s(115), backgroundColor: palette.glow }} />
       <SafeAreaView edges={edges} style={[{ flex: 1 }, style]}>
         {children}
       </SafeAreaView>

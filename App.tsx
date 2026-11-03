@@ -1,9 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Image, Text, View } from 'react-native';
-import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AppProvider, useApp } from './src/store/AppStore';
+import { ThemeProvider } from './src/theme/ThemeProvider';
 import { LaunchProvider } from './src/launch/LaunchProvider';
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { Notice } from './src/components/Bits';
@@ -51,7 +51,7 @@ function IntroSplash({ onDone }: { onDone: () => void }) {
         justifyContent: 'center',
       }}
     >
-      <Animated.View style={{ opacity: glow, position: 'absolute', width: 300, height: 300, borderRadius: 150, backgroundColor: 'rgba(255,255,255,0.9)' }} />
+      <Animated.View style={{ opacity: glow, position: 'absolute', width: 300, height: 300, borderRadius: 150, backgroundColor: palette.glow }} />
       <Animated.View style={{ opacity: fade, transform: [{ scale }], alignItems: 'center' }}>
         <Image source={require('./assets/splash-icon.png')} style={{ width: 148, height: 148, resizeMode: 'contain' }} />
         <Text style={{ marginTop: 20, fontSize: 27, fontWeight: '800', color: palette.ink, letterSpacing: 6 }}>剪纸仙灵</Text>
@@ -88,9 +88,10 @@ function BootGate() {
 export default function App() {
   return (
     <SafeAreaProvider>
-      <StatusBar style="dark" />
       <AppProvider>
-        <BootGate />
+        <ThemeProvider>
+          <BootGate />
+        </ThemeProvider>
       </AppProvider>
     </SafeAreaProvider>
   );

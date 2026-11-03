@@ -170,4 +170,6 @@ export interface AppSettings {
   lastAdapterFetchAt: number | null;
   /** 已读通告的版本号 */
   announcementSeen: string | null;
+  /** 主题：crystal 水晶白玻璃 / dark 黑夜玻璃 */
+  theme: 'crystal' | 'dark';
 }
