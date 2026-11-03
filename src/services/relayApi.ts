@@ -36,6 +36,9 @@ export interface RelayResponse<T = any> {
 export interface Transport {
   readonly name: 'bridge' | 'http';
   request(path: string, init?: RequestInitLite): Promise<RelayResponse>;
+  /** 仅 WebView 桥接支持：在页面里求值 */
+  eval?(expr: string, timeoutMs?: number): Promise<any>;
+  setApiBase?(base: string | null): void;
 }
 
 /** App 侧 HTTP 传输（用系统访问令牌，长期免 WebView） */
@@ -193,6 +196,76 @@ export async function fetchSelf(t: Transport): Promise<{ ok: boolean; self?: Sel
   };
 }
 
+/** 从探针记录 + 页面 origin 推导候选 API 根地址（按可能性排序） */
+export function deriveApiCandidates(hints: any, origin: string | null): string[] {
+  const out: string[] = [];
+  const push = (u: string | null | undefined) => {
+    if (!u || typeof u !== 'string') return;
+    const clean = u.replace(/\/+$/, '');
+    if (!/^https?:\/\//i.test(clean)) return;
+    if (out.indexOf(clean) === -1) out.push(clean);
+  };
+  if (Array.isArray(hints)) {
+    for (const h of hints) {
+      // 探针可能记录到完整请求地址，这里统一截出 /api/ 之前的根
+      if (typeof h === 'string' && h.includes('/api/')) push(h.slice(0, h.indexOf('/api/')));
+      else push(h);
+    }
+  }
+  if (origin) {
+    push(origin);
+    try {
+      const u = new URL(origin);
+      const parts = u.hostname.split('.');
+      if (parts.length > 2) {
+        push(`${u.protocol}//${parts.slice(-2).join('.')}`);
+        push(`${u.protocol}//api.${parts.slice(-2).join('.')}`);
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  return out;
+}
+
+/**
+ * 网页按钮签到兜底：在页面里找「签到」按钮并点击，再确认是否变成「已签到」。
+ * 用于接口签到 404 但主页确有签到按钮的面板（公益站/路由站常见）。
+ */
+export async function domCheckin(t: Transport): Promise<{ ok: boolean; message: string }> {
+  if (!t.eval) return { ok: false, message: '当前传输不支持页面操作' };
+  const res = await t.eval(
+    `(async function(){
+      var pick = function(){
+        var nodes = document.querySelectorAll('button, a, div, span, [role="button"]');
+        for (var i = 0; i < nodes.length; i++) {
+          var el = nodes[i];
+          var txt = (el.textContent || '').trim();
+          if (!txt || txt.length > 8) continue;
+          if (/已签到|签到成功/.test(txt)) continue;
+          if (/签到/.test(txt)) {
+            var r = el.getBoundingClientRect();
+            if (r.width > 4 && r.height > 4) return el;
+          }
+        }
+        return null;
+      };
+      var before = document.body.innerText || '';
+      var el = pick();
+      if (!el) return { clicked: false, done: /已签到/.test(before) };
+      el.click();
+      await new Promise(function(r){ setTimeout(r, 1500); });
+      var after = document.body.innerText || '';
+      var done = /已签到|签到成功/.test(after);
+      return { clicked: true, done: done };
+    })()`,
+    20000,
+  );
+  if (!res || typeof res !== 'object') return { ok: false, message: '页面签到按钮探测无响应' };
+  if (res.done) return { ok: true, message: '已通过网页签到按钮完成签到' };
+  if (res.clicked) return { ok: false, message: '点了网页签到按钮但没确认到成功状态，请到页面里看一眼' };
+  return { ok: false, message: '页面上没找到签到按钮（可能今天已签过或站点未开放）' };
+}
 /* ------------------------------- 签到 ------------------------------- */
 
 export interface CheckinSupport {

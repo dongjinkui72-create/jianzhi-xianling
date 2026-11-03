@@ -21,6 +21,7 @@
         "backgroundColor": "#F7FAFF"
       },
       "permissions": [],
+      "softInputMode": "resize",
       "versionCode": 3
     },
     "ios": {

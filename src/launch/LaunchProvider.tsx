@@ -8,6 +8,7 @@ import { apiHostFor, canAutoImport, launchWithImport, type LaunchResult } from '
 import { canOverlay, requestOverlay, showCredentialOverlay } from '../native/overlay';
 import { navigationRef } from '../navigation/navRef';
 import { useApp } from '../store/AppStore';
+import { HeadlessCheckinHost } from './HeadlessCheckinHost';
 import { palette } from '../theme/tokens';
 import { useScale } from '../theme/useScale';
 import type { ChatClient } from '../lib/types';
@@ -139,6 +140,7 @@ export function LaunchProvider({ children }: { children: React.ReactNode }) {
   return (
     <LaunchCtx.Provider value={value}>
       {children}
+      <HeadlessCheckinHost />
 
       {/* 选择聊天软件 */}
       <Sheet visible={pickerOpen} onClose={() => setPickerOpen(false)} title="选择要启动的 AI 聊天软件">
@@ -159,18 +161,6 @@ export function LaunchProvider({ children }: { children: React.ReactNode }) {
                     {c.name}
                   </Text>
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sc.s(5), marginTop: sc.s(5) }}>
-                    <Chip
-                      label={
-                        c.importKind === 'deeplink_import'
-                          ? '可全自动导入（deep link）'
-                          : c.importKind === 'url_settings_import'
-                            ? '可全自动导入（URL 参数）'
-                            : c.importKind === 'launch_only'
-                              ? '仅能打开'
-                              : '导入能力无法确认'
-                      }
-                      tone={auto ? 'ok' : c.importKind === 'launch_only' ? 'warn' : 'muted'}
-                    />
                     <Chip
                       label={c.detected === 'installed' ? '已识别安装' : c.detected === 'unknown' ? '安装状态无法确认' : '未安装'}
                       tone={c.detected === 'installed' ? 'accent' : 'muted'}

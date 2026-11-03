@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, KeyboardAvoidingView, Platform, Text, TextInput, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, Text, TextInput, View } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -8,17 +8,20 @@ import { normalizeUrl, siteKeyOf } from '../lib/normalize';
 import { palette, radius } from '../theme/tokens';
 import { useScale } from '../theme/useScale';
 import { useApp } from '../store/AppStore';
-import { RelayBridge } from '../services/relayBridge';
-import { detectRelayFamily, fetchCheckinSupport, fetchSelf, joinApiBase } from '../services/relayApi';
+import { RelayBridge, SPY_JS } from '../services/relayBridge';
+import { deriveApiCandidates, detectRelayFamily, domCheckin, fetchCheckinSupport, fetchSelf, joinApiBase, type SelfInfo } from '../services/relayApi';
 import type { Relay } from '../lib/types';
 
 /**
  * 中转站内嵌登录页（2.0 极简版）。
- * 登录后界面上只出现两个按钮：
- *   1. 手动粘贴密钥
- *   2. 我已登录，自动创建保存密钥和调用地址
- * 不展示任何任务执行代码 / 日志。结果一律用提示框如实回报。
- * 同时检测该站是否有免费签到：有则自动加入「每日签到」列表。
+ * 登录后只出现两个按钮：「手动粘贴密钥」「我已登录，自动创建保存密钥和调用地址」。
+ * 不展示任何执行日志。
+ *
+ * 关键能力：
+ *  - 页面加载前注入网络探针，嗅探 SPA 真实调用的 API 根地址（公益站/路由站常常不在默认 /api 下）；
+ *  - 逐个候选地址试读登录态，命中后用它建档；
+ *  - 签到双通道：接口签到优先；接口 404 但主页有签到按钮时，自动点网页按钮完成签到；
+ *  - 无论建档成败，只要读到登录态就把站点收进「每日签到」列表。
  */
 
 interface AutoResult {
@@ -35,6 +38,7 @@ export function RelayWebScreen({ route, navigation }: any) {
 
   const initialUrl = normalizeUrl(route?.params?.url || 'https://');
   const relayId: string | undefined = route?.params?.relayId;
+  const autoCheckin: boolean = !!route?.params?.autoCheckin;
 
   const [url, setUrl] = useState(initialUrl);
   const [inputUrl, setInputUrl] = useState(initialUrl);
@@ -49,6 +53,7 @@ export function RelayWebScreen({ route, navigation }: any) {
   const webRef = useRef<any>(null);
   const bridge = useRef(new RelayBridge()).current;
   const relayRef = useRef<Relay | null>(null);
+  const autoRan = useRef(false);
 
   useEffect(() => {
     bridge.attach(webRef);
@@ -65,66 +70,128 @@ export function RelayWebScreen({ route, navigation }: any) {
     return r;
   }, [app, relayId, url, route?.params?.name]);
 
-  /** 按钮 2：我已登录，自动创建保存密钥和调用地址 */
-  const runAuto = async () => {
-    setBusy(true);
-    setResult(null);
-    try {
-      const relay = await ensureRelay();
-      if (!bridge.ready) {
-        setResult({ ok: false, title: '还没停在站点页面内', lines: [{ k: '提示', v: '请在下方页面完成登录后再点这个按钮' }] });
-        return;
-      }
-      const fam = await detectRelayFamily(bridge);
-      const selfRes = await fetchSelf(bridge);
-      if (!selfRes.ok || !selfRes.self) {
-        setResult({
-          ok: false,
-          title: '还没检测到登录态',
-          lines: [{ k: '原因', v: selfRes.reason || '未登录' }, { k: '提示', v: '请先在下方页面里正常登录，再点「我已登录」' }],
-        });
-        return;
-      }
-      await app.persistAccessToken(relay, bridge);
-      const prov = await app.provisionRelay(relay, bridge);
-      const support = await fetchCheckinSupport(bridge);
-
-      const lines: { k: string; v: string }[] = [];
-      lines.push({ k: '站点架构', v: fam.detail });
-      lines.push({ k: '账号', v: `${selfRes.self.username || '未知'}（ID ${selfRes.self.id}）` });
-
-      let checkinNote = '';
-      if (support.support === 'yes') {
-        await app.updateRelay({ ...relay, checkinSupport: 'yes', checkinSupportNote: null, hasSession: true });
-        checkinNote = '该站有免费签到领额度，已加入「每日签到」列表';
-      } else if (support.support === 'no') {
-        await app.updateRelay({ ...relay, checkinSupport: 'no', checkinSupportNote: support.reason });
-        checkinNote = `该站没有免费签到功能（${support.reason || '站点未开启'}）`;
-      } else {
-        await app.updateRelay({ ...relay, checkinSupport: 'unknown', checkinSupportNote: support.reason });
-        checkinNote = `签到能力无法确认（${support.reason || '尚未探测到'}）`;
-      }
-
-      if (prov.ok && prov.key) {
-        lines.push({ k: 'API 密钥', v: `${prov.key.maskedKey}（已存本机加密区）` });
-        lines.push({ k: '调用地址', v: prov.key.baseUrl });
-        lines.push({ k: '每日签到', v: checkinNote });
-        setResult({ ok: true, title: '已自动创建并保存', lines });
-      } else {
-        lines.push({ k: '每日签到', v: checkinNote });
-        setResult({
-          ok: false,
-          title: '这个站点没法自动建档',
-          lines,
-          warn: `${prov.message || '自动创建失败'}。请用「手动粘贴密钥」把密钥存进来，效果完全一样。`,
-        });
-      }
-    } finally {
-      setBusy(false);
+  /** 嗅探真实 API 根并读取登录态 */
+  const discover = useCallback(async (): Promise<{ self: SelfInfo | null; apiBase: string | null; tried: string[] }> => {
+    const hints = await bridge.eval('(window.__jzApis || [])');
+    const cands = deriveApiCandidates(hints, bridge.currentOrigin);
+    const tried: string[] = [];
+    for (const c of cands) {
+      bridge.setApiBase(c);
+      tried.push(c);
+      const s = await fetchSelf(bridge);
+      if (s.ok && s.self) return { self: s.self, apiBase: c, tried };
     }
-  };
+    bridge.setApiBase(null);
+    return { self: null, apiBase: null, tried };
+  }, [bridge]);
 
-  /** 按钮 1：手动粘贴密钥 */
+  /** 签到能力探测：接口优先，网页按钮兜底 */
+  const probeCheckin = useCallback(
+    async (relay: Relay) => {
+      const support = await fetchCheckinSupport(bridge);
+      if (support.support === 'yes') {
+        const next = { ...relay, checkinSupport: 'yes' as const, checkinMode: 'api' as const, checkinSupportNote: null };
+        await app.updateRelay(next);
+        return { mode: 'api' as const, note: null as string | null };
+      }
+      const dom = await domCheckin(bridge);
+      if (dom.ok) {
+        const next = { ...relay, checkinSupport: 'yes' as const, checkinMode: 'dom' as const, checkinSupportNote: dom.message };
+        await app.updateRelay(next);
+        return { mode: 'dom' as const, note: dom.message };
+      }
+      const next = { ...relay, checkinSupport: support.support, checkinMode: null, checkinSupportNote: dom.message || support.reason };
+      await app.updateRelay(next);
+      return { mode: null, note: dom.message || support.reason };
+    },
+    [app, bridge],
+  );
+
+  /** 按钮 2 / 自动签到入口 */
+  const runAuto = useCallback(
+    async (onlyCheckin: boolean) => {
+      setBusy(true);
+      setResult(null);
+      try {
+        const relay0 = await ensureRelay();
+        if (!bridge.ready) {
+          setResult({ ok: false, title: '还没停在站点页面内', lines: [{ k: '提示', v: '请在下方页面完成登录后再点按钮' }] });
+          return;
+        }
+        const { self, apiBase, tried } = await discover();
+        if (!self) {
+          setResult({
+            ok: false,
+            title: '还没检测到登录态',
+            lines: [
+              { k: '已尝试', v: tried.length ? tried.join('、') : '页面所在域' },
+              { k: '提示', v: '请先在下方页面里正常登录，再点「我已登录」' },
+            ],
+          });
+          return;
+        }
+        const fam = await detectRelayFamily(bridge);
+        const relay: Relay = {
+          ...relay0,
+          apiBase: apiBase && apiBase !== bridge.currentOrigin ? apiBase : relay0.apiBase,
+          hasSession: true,
+          kind: fam.family === 'unknown' ? relay0.kind : fam.family,
+          userId: self.id,
+          username: self.username,
+        };
+        await app.updateRelay(relay);
+        relayRef.current = relay;
+
+        if (onlyCheckin) {
+          const ck = await probeCheckin(relay);
+          setResult({
+            ok: ck.mode !== null,
+            title: ck.mode === 'api' ? '签到完成（接口）' : ck.mode === 'dom' ? '签到完成（网页按钮）' : '这个站没有可用的自动签到',
+            lines: [
+              { k: '站点', v: relay.name },
+              { k: '签到', v: ck.mode === 'api' ? '接口签到成功，已加入每日签到' : ck.mode === 'dom' ? '网页按钮签到成功，已加入每日签到' : `未能自动签到：${ck.note || '站点未开放'}` },
+            ],
+          });
+          return;
+        }
+
+        await app.persistAccessToken(relay, bridge);
+        const prov = await app.provisionRelay(relay, bridge);
+        const ck = await probeCheckin(relay);
+
+        const lines: { k: string; v: string }[] = [];
+        lines.push({ k: '站点架构', v: fam.detail });
+        lines.push({ k: '账号', v: `${self.username || '未知'}（ID ${self.id}）` });
+        if (prov.ok && prov.key) {
+          lines.push({ k: 'API 密钥', v: `${prov.key.maskedKey}（已存本机加密区）` });
+          lines.push({ k: '调用地址', v: prov.key.baseUrl });
+        }
+        lines.push({
+          k: '每日签到',
+          v: ck.mode === 'api' ? '有免费签到（接口），已加入每日签到' : ck.mode === 'dom' ? '有免费签到（网页按钮），已加入每日签到' : `未检测到免费签到：${ck.note || '站点未开放'}`,
+        });
+        setResult({
+          ok: prov.ok,
+          title: prov.ok ? '已自动创建并保存' : '这个站点没法自动建档',
+          lines,
+          warn: prov.ok ? undefined : `${prov.message || '自动创建失败'}。请用「手动粘贴密钥」保存，效果一样。`,
+        });
+      } finally {
+        setBusy(false);
+      }
+    },
+    [app, bridge, discover, ensureRelay, probeCheckin],
+  );
+
+  // 从「每日签到」点「去签到」进来时：登录态就绪后自动完成网页签到
+  useEffect(() => {
+    if (!autoCheckin || autoRan.current) return;
+    if (loading) return;
+    autoRan.current = true;
+    const t = setTimeout(() => runAuto(true), 1200);
+    return () => clearTimeout(t);
+  }, [autoCheckin, loading, runAuto]);
+
   const submitPaste = async () => {
     if (!pkKey.trim() || !pkBase.trim()) {
       setResult({ ok: false, title: '信息不完整', lines: [{ k: '提示', v: 'API Key 与调用地址都要填' }] });
@@ -140,6 +207,7 @@ export function RelayWebScreen({ route, navigation }: any) {
       relayId: relay.id,
       source: 'manual',
     });
+    if (item) await app.updateRelay({ ...relay, hasSession: true });
     setPasteOpen(false);
     if (item) {
       setResult({
@@ -148,6 +216,7 @@ export function RelayWebScreen({ route, navigation }: any) {
         lines: [
           { k: 'API 密钥', v: `${item.maskedKey}（已存本机加密区）` },
           { k: '调用地址', v: item.baseUrl },
+          { k: '每日签到', v: '站点已收进每日签到列表，签到能力以列表标注为准' },
         ],
       });
     }
@@ -155,6 +224,7 @@ export function RelayWebScreen({ route, navigation }: any) {
 
   const go = () => {
     setResult(null);
+    autoRan.current = false;
     const next = normalizeUrl(inputUrl);
     setUrl(next);
     setPkBase(joinApiBase(next));
@@ -172,7 +242,7 @@ export function RelayWebScreen({ route, navigation }: any) {
           <IconButton icon={loading ? 'hourglass-outline' : 'refresh'} onPress={() => webRef.current?.reload()} tone="accent" />
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: sc.s(8), marginTop: sc.s(9) }}>
-          <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', height: sc.s(38), paddingHorizontal: sc.s(11), borderRadius: radius.pill, backgroundColor: 'rgba(255,255,255,0.9)', borderWidth: 1, borderColor: palette.hairline }}>
+          <View style={{ flex: 1, height: sc.s(40), flexDirection: 'row', alignItems: 'center', paddingHorizontal: sc.s(11), borderRadius: radius.pill, backgroundColor: 'rgba(255,255,255,0.9)', borderWidth: 1, borderColor: palette.hairline }}>
             <Ionicons name="link-outline" size={sc.s(14)} color={palette.inkFaint} />
             <TextInput
               value={inputUrl}
@@ -183,7 +253,9 @@ export function RelayWebScreen({ route, navigation }: any) {
               autoCorrect={false}
               keyboardType="url"
               selectTextOnFocus
-              style={{ flex: 1, marginLeft: sc.s(7), fontSize: sc.fs(12.5), color: palette.ink, padding: 0 }}
+              placeholder="https://..."
+              placeholderTextColor={palette.inkFaint}
+              style={{ flex: 1, marginLeft: sc.s(7), height: sc.s(38), fontSize: sc.fs(12.5), color: palette.ink, padding: 0, textAlignVertical: 'center', includeFontPadding: false }}
             />
           </View>
           <GlassButton label="前往" size="sm" onPress={go} />
@@ -194,6 +266,7 @@ export function RelayWebScreen({ route, navigation }: any) {
         <WebView
           ref={webRef}
           source={{ uri: url }}
+          injectedJavaScriptBeforeContentLoaded={SPY_JS}
           onMessage={(e) => bridge.handleMessage(e.nativeEvent.data)}
           onLoadStart={() => setLoading(true)}
           onLoadEnd={() => setLoading(false)}
@@ -227,14 +300,13 @@ export function RelayWebScreen({ route, navigation }: any) {
               icon="flash"
               size="lg"
               loading={busy}
-              onPress={runAuto}
+              onPress={() => runAuto(false)}
               style={{ width: '100%' } as any}
             />
           </View>
         </View>
       </KeyboardAvoidingView>
 
-      {/* 结果提示框 */}
       <Sheet visible={!!result} onClose={() => setResult(null)} title={result?.title || ''}>
         {result ? (
           <>
@@ -256,7 +328,6 @@ export function RelayWebScreen({ route, navigation }: any) {
         ) : null}
       </Sheet>
 
-      {/* 手动粘贴 */}
       <Sheet visible={pasteOpen} onClose={() => setPasteOpen(false)} title="手动粘贴密钥" footer={<GlassButton label="保存到本机" icon="save-outline" size="lg" onPress={submitPaste} />}>
         <Field label="备注名" value={pkLabel} onChangeText={setPkLabel} placeholder={route?.params?.name || '站点名'} />
         <Field label="API Key" value={pkKey} onChangeText={setPkKey} placeholder="sk-..." autoCapitalize="none" />

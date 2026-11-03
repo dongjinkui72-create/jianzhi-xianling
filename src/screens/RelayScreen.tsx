@@ -52,8 +52,8 @@ export function RelayScreen() {
   const [pkProtocol, setPkProtocol] = useState<ApiProtocol>('openai_compatible');
 
   const saved = useMemo(() => app.relays.filter((r) => r.hasSession || r.userId || r.accessTokenRef), [app.relays]);
-  /** 每日签到列表：登录时检测到有免费签到的站点会自动进这里 */
-  const checkinList = useMemo(() => saved.filter((r) => r.checkinSupport === 'yes'), [saved]);
+  /** 每日签到列表：登录过的站点都会进这里；能不能签、怎么签由角标说明 */
+  const checkinList = useMemo(() => saved, [saved]);
   const directory = useMemo(() => app.relays.filter((r) => !(r.hasSession || r.userId || r.accessTokenRef)), [app.relays]);
   const today = todayKey();
   const todayDone = useMemo(
@@ -68,7 +68,8 @@ export function RelayScreen() {
     [app.logs, today],
   );
 
-  const openRelay = (r: Relay) => navigationRef.isReady() && navigationRef.navigate('RelayWeb', { relayId: r.id, url: r.baseUrl, name: r.name });
+  const openRelay = (r: Relay, autoCheckin = false) =>
+    navigationRef.isReady() && navigationRef.navigate('RelayWeb', { relayId: r.id, url: r.baseUrl, name: r.name, autoCheckin });
 
   const doCheckin = async (r: Relay) => {
     setBusyId(r.id);

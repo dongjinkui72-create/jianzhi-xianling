@@ -31,7 +31,6 @@ export function SettingsScreen({ navigation }: any) {
   const [installedOpen, setInstalledOpen] = useState(false);
   const [installed, setInstalled] = useState<InstalledApp[]>([]);
   const [installedBusy, setInstalledBusy] = useState(false);
-  const [feedOpen, setFeedOpen] = useState(false);
   const [adapterSheetOpen, setAdapterSheetOpen] = useState(false);
   const [feedUrl, setFeedUrl] = useState('');
   const [scanning, setScanning] = useState(false);
@@ -146,19 +145,6 @@ export function SettingsScreen({ navigation }: any) {
     await app.refreshAdapters(true);
   };
 
-  const submitFeed = async () => {
-    const u = feedUrl.trim();
-    if (!/^https?:\/\//i.test(u)) {
-      setNote('情报源必须是 http(s) 地址');
-      return;
-    }
-    const next = Array.from(new Set([...app.settings.feedUrls, u]));
-    await app.patchSettings({ feedUrls: next });
-    setFeedUrl('');
-    setFeedOpen(false);
-    setNote('已添加情报源，下次抓取会带上它');
-  };
-
   const ClientRow = ({ c }: { c: ChatClient }) => {
     const isPref = app.settings.preferredClientId === c.id;
     return (
@@ -169,18 +155,10 @@ export function SettingsScreen({ navigation }: any) {
         <View style={{ flex: 1 }}>
           <Text numberOfLines={1} style={{ fontSize: sc.fs(13.5), fontWeight: '700', color: palette.ink }}>{c.name}</Text>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sc.s(5), marginTop: sc.s(4) }}>
-            <Chip label={c.importKind === 'deeplink_import' ? 'deep link 直写' : 'URL 参数写入'} tone="ok" />
-            <Chip label={c.detected === 'installed' ? '已识别安装' : c.browserBased ? '网页版/PWA' : '无法确认安装'} tone={c.detected === 'installed' ? 'accent' : 'muted'} />
-            {isPref ? <Chip label="默认启动" tone="ok" icon="star" /> : null}
             {c.source === 'feed' ? <Chip label="远程清单" tone="accent" /> : null}
           </View>
           {c.note ? <Text style={{ marginTop: sc.s(3), fontSize: sc.fs(10), color: palette.inkFaint, lineHeight: sc.fs(14) }}>{c.note}</Text> : null}
-          {c.importKind === 'url_settings_import' ? (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sc.s(6), marginTop: sc.s(5) }}>
-              <Text numberOfLines={1} style={{ flex: 1, fontSize: sc.fs(10.5), color: palette.inkSoft }}>{c.settingsBase}</Text>
-              <GlassButton label="改地址" size="sm" tone="muted" onPress={() => setBaseEdit({ id: c.id, value: c.settingsBase || '' })} />
-            </View>
-          ) : null}
+
         </View>
         <View style={{ gap: sc.s(5) }}>
           <GlassButton label={isPref ? '取消' : '设为默认'} size="sm" tone={isPref ? 'muted' : 'accent'} onPress={() => app.patchSettings({ preferredClientId: isPref ? null : c.id })} />
@@ -288,26 +266,6 @@ export function SettingsScreen({ navigation }: any) {
           </View>
         </Glass>
 
-        {/* 情报源 */}
-        <Glass style={{ marginBottom: sc.s(13) }} pad={sc.s(14)}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: sc.s(6) }}>
-            <Ionicons name="radio-outline" size={sc.s(18)} color={palette.accent} />
-            <Text style={{ marginLeft: sc.s(8), flex: 1, fontSize: sc.fs(16), fontWeight: '800', color: palette.ink }}>雷达站情报源</Text>
-            <GlassButton label="立即抓取" icon="download-outline" size="sm" tone="muted" loading={app.radarBusy} onPress={() => app.refreshRadar(true)} />
-          </View>
-          <GlassButton label="添加情报源" icon="add-outline" size="sm" onPress={() => setFeedOpen(true)} />
-          {app.settings.feedUrls.length ? (
-            <View style={{ marginTop: sc.s(9) }}>
-              {app.settings.feedUrls.map((u) => (
-                <View key={u} style={{ flexDirection: 'row', alignItems: 'center', gap: sc.s(8), paddingVertical: sc.s(7), borderTopWidth: 1, borderTopColor: palette.hairlineSoft }}>
-                  <Text numberOfLines={1} style={{ flex: 1, fontSize: sc.fs(11.5), color: palette.inkSoft }}>{u}</Text>
-                  <IconButton icon="trash-outline" size={15} tone="danger" onPress={() => app.patchSettings({ feedUrls: app.settings.feedUrls.filter((x) => x !== u) })} />
-                </View>
-              ))}
-            </View>
-          ) : null}
-        </Glass>
-
         {/* 数据与隐私 */}
         <Collapsible title="数据与隐私" right={<Ionicons name="lock-closed-outline" size={sc.s(17)} color={palette.ok} />}>
           <View style={{ paddingTop: sc.s(10) }}>
@@ -317,18 +275,6 @@ export function SettingsScreen({ navigation }: any) {
             <KeyValue k="本机加密区" v="真实 API Key、系统访问令牌（SecureStore）" />
             <KeyValue k="上传行为" v="无。App 不向任何服务器发送你的密钥或签到记录" />
             <KeyValue k="应用列表权限" v="仅用于「从已安装应用添加」，结果只在本机比对适配器登记表" />
-          </View>
-        </Collapsible>
-
-        <Collapsible title="能力边界（如实标注）" right={<Ionicons name="information-circle-outline" size={sc.s(17)} color={palette.warn} />}>
-          <View style={{ paddingTop: sc.s(10) }}>
-            <Notice tone="warn" title="自动签到">只对开启了签到接口、且未强制人机验证的站点有效；其余标「只能手动」，日志记 manual_only，绝不伪造成功。</Notice>
-            <View style={{ height: sc.s(8) }} />
-            <Notice tone="warn" title="自动建档">只适配 New API / One API 架构面板；其它架构标「不支持」并给手动入口。</Notice>
-            <View style={{ height: sc.s(8) }} />
-            <Notice tone="warn" title="全自动导入">只有具备官方导入协议的软件才会出现在可导入列表（当前：Chatbox、LobeChat，以及远程清单补充的）。不接受第三方密钥的官方 App 物理上无法导入，App 不会假装能做到。</Notice>
-            <View style={{ height: sc.s(8) }} />
-            <Notice tone="warn" title="安装检测">{isWhitelistCapableShell() ? '当前运行环境可以扩展原生壳白名单，检测结果可信。' : '当前运行环境无法扩展原生壳白名单，检测结果一律标「无法确认」，不会谎报未安装。'}</Notice>
           </View>
         </Collapsible>
 
@@ -343,7 +289,7 @@ export function SettingsScreen({ navigation }: any) {
 
       {/* 从已安装应用添加 */}
       <Sheet visible={installedOpen} onClose={() => setInstalledOpen(false)} title="从已安装应用添加">
-        <Field label="搜索要添加的软件" value={q} onChangeText={setQ} placeholder="输入名称或包名，如 chatbox / tavern" autoCapitalize="none" />
+        <Field label="搜索要添加的软件" value={q} onChangeText={setQ} autoFocus placeholder="输入名称或包名，如 chatbox / tavern" autoCapitalize="none" />
         {q.trim() && installedBusy ? <Busy label="正在读取应用列表…" /> : null}
         {q.trim() && !installedBusy && !appListAvailable() ? (
           <Notice tone="warn" title="当前环境读不到已安装应用">读取应用列表需要原生模块；登记表搜索仍可用。</Notice>
@@ -387,11 +333,6 @@ export function SettingsScreen({ navigation }: any) {
       {/* 适配器清单地址 */}
       <Sheet visible={adapterSheetOpen} onClose={() => setAdapterSheetOpen(false)} title="添加适配器清单" footer={<GlassButton label="添加并拉取" icon="cloud-download-outline" size="lg" onPress={submitAdapterFeed} />}>
         <Field label="清单 JSON 地址" value={feedUrl} onChangeText={setFeedUrl} placeholder="https://raw.githubusercontent.com/你的仓库/main/adapters/clients.json" keyboardType="url" autoCapitalize="none" hint="清单格式见 README「适配器清单」。" />
-      </Sheet>
-
-      {/* 情报源地址 */}
-      <Sheet visible={feedOpen} onClose={() => setFeedOpen(false)} title="添加情报源" footer={<GlassButton label="添加" icon="add" size="lg" onPress={submitFeed} />}>
-        <Field label="情报 JSON 地址" value={feedUrl} onChangeText={setFeedUrl} placeholder="https://example.com/benefits.json" keyboardType="url" autoCapitalize="none" />
       </Sheet>
 
       {/* base 地址编辑 */}

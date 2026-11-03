@@ -56,6 +56,10 @@ export interface Relay {
   /** 自动建档 API Key 的能力：yes / no / unknown */
   autoKeySupport: CapabilityState;
   autoKeyNote: string | null;
+  /** 实际可用的 API 根地址（探针嗅探出来，可能与站点首页不同域/不同前缀） */
+  apiBase: string | null;
+  /** 签到方式：api 接口签到 / dom 网页按钮签到 */
+  checkinMode: 'api' | 'dom' | null;
   quota: number | null;
   usedQuota: number | null;
   remainingUsd: number | null;

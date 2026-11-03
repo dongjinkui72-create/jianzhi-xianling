@@ -128,7 +128,7 @@ t('每条情报都有「怎么领」步骤和链接', () => {
 });
 t('中转站抓取关键词为 api + 中转站', () => {
   const F = require(path.join(base, 'services', 'radarFeed.js'));
-  assert.deepStrictEqual(F.RELAY_KEYWORDS, ['api', '中转站']);
+  assert.deepStrictEqual(F.RELAY_KEYWORDS, ['api', '中转站', '公益站', '路由站']);
 });
 t('中转站情报都命中关键词 api', () => {
   for (const b of S.allSeedBenefits().filter((x) => x.section === 'relay')) {
@@ -256,6 +256,24 @@ t('设置页/启动流程只保留可导入软件（大厂官方 App 被排除�
   for (const banned of ['chatgpt', 'claude', 'gemini', 'deepseek', 'doubao', 'grok', 'poe']) {
     assert.ok(!ids.includes(banned), banned + ' 不应出现在可导入列表');
   }
+});
+console.log('\n[10] API 根嗅探（公益站/路由站 404 场景回归）');
+t('探针记录的带前缀 API 地址能被还原成候选根', () => {
+  const cands = R.deriveApiCandidates(['https://ly.7625.xyz/apiroot/api/user/self'], 'https://ly.7625.xyz');
+  assert.strictEqual(cands[0], 'https://ly.7625.xyz/apiroot');
+  assert.ok(cands.includes('https://ly.7625.xyz'), '应包含页面所在域');
+  assert.ok(cands.includes('https://7625.xyz'), '应包含根域候选');
+  assert.ok(cands.includes('https://api.7625.xyz'), '应包含 api 子域候选');
+});
+t('无探针记录时至少回退到页面域及其变体', () => {
+  const cands = R.deriveApiCandidates([], 'https://console.example.com');
+  assert.deepStrictEqual(cands.slice(0, 3), ['https://console.example.com', 'https://example.com', 'https://api.example.com']);
+});
+t('后台签到模块可加载且导出齐全', () => {
+  const H = require(path.join(base, 'services', 'headlessCheckin.js'));
+  assert.strictEqual(typeof H.headlessCheckin, 'function');
+  assert.strictEqual(typeof H.registerHeadlessNavigator, 'function');
+  assert.strictEqual(H.headlessReady(), false);
 });
 console.log('\n────────────────────────────');
 console.log(`通过 ${pass} 项，失败 ${fail} 项`);

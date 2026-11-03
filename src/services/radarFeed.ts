@@ -16,7 +16,7 @@ import { uid } from '../lib/id';
  */
 
 /** 中转站情报抓取关键词（2.0 起为 api + 中转站） */
-export const RELAY_KEYWORDS = ['api', '中转站'];
+export const RELAY_KEYWORDS = ['api', '中转站', '公益站', '路由站'];
 export const RELAY_KEYWORD = RELAY_KEYWORDS[0];
 
 export interface FetchReport {

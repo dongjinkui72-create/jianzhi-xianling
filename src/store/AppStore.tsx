@@ -13,6 +13,7 @@ import { detectClients, shellCapabilityNote } from '../services/detectApps';
 import { checkKeyHealth } from '../services/healthCheck';
 import { offlineBenefits, refreshRadar, type FetchReport } from '../services/radarFeed';
 import { fetchAdapters, OFFICIAL_ADAPTER_FEED } from '../services/adapterFeed';
+import { headlessCheckin } from '../services/headlessCheckin';
 import { autoProvisionApiKey, createSystemAccessToken, doCheckin, fetchCheckinSupport, fetchSelf, httpTransport, joinApiBase, type Transport } from '../services/relayApi';
 
 interface NewKeyInput {
@@ -148,6 +149,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
               accessTokenRef: null,
               credentialRef: null,
               hasSession: false,
+              apiBase: null,
+              checkinMode: null,
               checkinSupport: 'unknown',
               checkinSupportNote: null,
               autoKeySupport: seed.kind === 'new-api' ? 'unknown' : 'no',
@@ -355,6 +358,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       accessTokenRef: null,
       credentialRef: null,
       hasSession: false,
+      apiBase: null,
+      checkinMode: null,
       checkinSupport: 'unknown',
       checkinSupportNote: null,
       autoKeySupport: 'unknown',
@@ -396,7 +401,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         name: 'http',
         async request(path, init = {}) {
           const token = await getSecret(r.accessTokenRef);
-          const t = httpTransport(r.baseUrl, { accessToken: token, userId: r.userId });
+          const t = httpTransport(r.apiBase || r.baseUrl, { accessToken: token, userId: r.userId });
           return t.request(path, init);
         },
       } as Transport;
@@ -518,31 +523,40 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const checkinRelay = useCallback(
     async (r: Relay, transport?: Transport): Promise<CheckinLog> => {
       const t = transport || relayTransport(r);
-      if (!t) {
-        return writeLog(
-          r,
-          'manual_only',
-          '本机没有该站点的长期登录凭据，App 无法代理签到。请在下方「打开站点」里登录后再签到；这是如实提示，不是签到失败。',
-          null,
-        );
+      const useApi = !!t && r.checkinMode !== 'dom';
+      let outcome: CheckinLog['result'];
+      let message: string;
+      let gained: number | null = null;
+
+      if (useApi) {
+        const res = await doCheckin(t);
+        outcome = res.outcome;
+        message = res.message;
+        gained = res.gainedUsd;
+        if (res.outcome === 'unconfirmed') {
+          const hb = await headlessCheckin(r);
+          outcome = hb.outcome;
+          message = hb.message;
+        }
+      } else {
+        // 无长期凭据 / 签到在网页按钮上：后台隐形 WebView 一键完成，不跳转界面
+        const hb = await headlessCheckin(r);
+        outcome = hb.outcome;
+        message = hb.message;
       }
-      const already = await DB.hasCheckedInToday(r.id, todayKey());
-      const res = await doCheckin(t);
-      if (res.outcome === 'success') {
+
+      if (outcome === 'success') {
         await DB.upsertRelay({ ...r, lastCheckinAt: Date.now(), lastSyncAt: Date.now() });
         setRelays(await DB.listRelays());
       }
-      if (res.outcome === 'manual_only' || res.outcome === 'unconfirmed') {
-        const support = res.outcome === 'manual_only' ? 'no' : 'unknown';
-        await DB.upsertRelay({ ...r, checkinSupport: support, checkinSupportNote: res.message });
+      if (outcome === 'manual_only' || outcome === 'unconfirmed') {
+        await DB.upsertRelay({ ...r, checkinSupport: outcome === 'manual_only' ? 'no' : 'unknown', checkinSupportNote: message });
         setRelays(await DB.listRelays());
       }
-      void already;
-      return writeLog(r, res.outcome, res.message, res.gainedUsd);
+      return writeLog(r, outcome, message, gained);
     },
     [relayTransport, writeLog],
   );
-
   const checkinAll = useCallback(
     async (transports?: Record<string, Transport>) => {
       setCheckinBusy(true);
@@ -552,7 +566,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         for (const r of targets) {
           const t = transports?.[r.id] || relayTransport(r);
           if (!t) {
-            out.push(await writeLog(r, 'manual_only', '无长期凭据，需打开站点页面签到（如实提示，未伪造成功）', null));
+            out.push(await writeLog(r, 'manual_only', '该站还没存长期凭据或签到在网页按钮上：在「每日签到」里点它那一行的『去签到』即可一键完成（如实提示，未伪造成功）', null));
             continue;
           }
           out.push(await checkinRelay(r, t));

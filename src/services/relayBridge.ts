@@ -15,11 +15,41 @@ export type WebViewRefLike = { current: { injectJavaScript: (js: string) => void
  *
  * 限制（如实告知）：桥接只在 WebView 停留在该站点同源页面时有效。
  */
+/** 页面加载前注入的网络探针：记录 SPA 真实调用的 /api/ 地址，用于发现非标准 API 根 */
+export const SPY_JS = `;(function(){
+  if (window.__jzSpy) return;
+  window.__jzSpy = 1;
+  window.__jzApis = [];
+  var rec = function(u){
+    try {
+      if (typeof u !== 'string') return;
+      var i = u.indexOf('/api/');
+      if (i < 0) return;
+      var base = u.slice(0, i);
+      if (!base || window.__jzApis.indexOf(base) !== -1) return;
+      if (window.__jzApis.length < 30) window.__jzApis.push(base);
+    } catch (e) {}
+  };
+  try {
+    var of = window.fetch;
+    window.fetch = function(input){
+      try { rec(typeof input === 'string' ? input : (input && input.url)); } catch (e) {}
+      return of.apply(this, arguments);
+    };
+    var oo = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function(m, u){
+      try { rec(u); } catch (e) {}
+      return oo.apply(this, arguments);
+    };
+  } catch (e) {}
+})(); true;`;
 export class RelayBridge implements Transport {
   readonly name = 'bridge' as const;
 
   private webviewRef: WebViewRefLike | null = null;
   private origin: string | null = null;
+  /** 探针嗅探到的真实 API 根地址（可能与页面 origin 不同） */
+  private apiBase: string | null = null;
   private pending = new Map<string, (r: RelayResponse) => void>();
   private timers = new Map<string, any>();
 
@@ -31,6 +61,14 @@ export class RelayBridge implements Transport {
     this.webviewRef = null;
     this.origin = null;
     this.rejectAll('WebView 已关闭');
+  }
+
+  setApiBase(base: string | null) {
+    this.apiBase = base ? base.replace(/\/+$/, '') : null;
+  }
+
+  get currentApiBase(): string | null {
+    return this.apiBase;
   }
 
   setOrigin(url: string | null) {
@@ -67,6 +105,17 @@ export class RelayBridge implements Transport {
       return;
     }
     if (!msg || msg.__jz !== 1 || typeof msg.rid !== 'string') return;
+    if (msg.isEval) {
+      const resolveEval = this.pending.get(msg.rid);
+      if (resolveEval) {
+        const t = this.timers.get(msg.rid);
+        if (t) clearTimeout(t);
+        this.timers.delete(msg.rid);
+        this.pending.delete(msg.rid);
+        resolveEval({ ok: true, status: 200, data: msg.data });
+      }
+      return;
+    }
     const resolve = this.pending.get(msg.rid);
     if (!resolve) return;
     const timer = this.timers.get(msg.rid);
@@ -141,6 +190,41 @@ export class RelayBridge implements Transport {
         this.timers.delete(rid);
         this.pending.delete(rid);
         resolve({ ok: false, status: 0, error: `注入失败：${e?.message || e}` });
+      }
+    });
+  }
+
+  /** 在页面里求值（支持 Promise），用于读取探针记录 / 操作 DOM */
+  async eval(expr: string, timeoutMs = 15000): Promise<any> {
+    const wv = this.webviewRef?.current;
+    if (!wv) return undefined;
+    const rid = uid('ev');
+    const js = `;(function(){
+  var rid = ${JSON.stringify(rid)};
+  var send = function(v){ try { window.ReactNativeWebView.postMessage(JSON.stringify({ __jz: 1, rid: rid, isEval: true, data: v })); } catch(e) {} };
+  try {
+    Promise.resolve().then(function(){ return ${expr}; }).then(send, function(e){ send('EVAL_ERROR: ' + String((e && e.message) || e)); });
+  } catch (e) {
+    send('EVAL_ERROR: ' + String((e && e.message) || e));
+  }
+})(); true;`;
+    return new Promise<any>((resolve) => {
+      const timer = setTimeout(() => {
+        if (this.pending.has(rid)) {
+          this.pending.delete(rid);
+          this.timers.delete(rid);
+          resolve(undefined);
+        }
+      }, timeoutMs);
+      this.timers.set(rid, timer);
+      this.pending.set(rid, (r) => resolve(r.data));
+      try {
+        wv.injectJavaScript(js);
+      } catch {
+        clearTimeout(timer);
+        this.pending.delete(rid);
+        this.timers.delete(rid);
+        resolve(undefined);
       }
     });
   }

@@ -116,7 +116,7 @@ export function GlassButton({ label, icon, onPress, tone = 'accent', disabled, l
   );
 }
 
-export function Field({ label, value, onChangeText, placeholder, multiline, secure, autoCapitalize, keyboardType, hint, right }: { label?: string; value: string; onChangeText: (t: string) => void; placeholder?: string; multiline?: boolean; secure?: boolean; autoCapitalize?: any; keyboardType?: any; hint?: string | null; right?: React.ReactNode }) {
+export function Field({ label, value, onChangeText, placeholder, multiline, secure, autoCapitalize, keyboardType, hint, right, autoFocus }: { label?: string; value: string; onChangeText: (t: string) => void; placeholder?: string; multiline?: boolean; secure?: boolean; autoCapitalize?: any; keyboardType?: any; hint?: string | null; right?: React.ReactNode; autoFocus?: boolean }) {
   const sc = useScale();
   return (
     <View style={{ marginBottom: sc.s(12) }}>
@@ -134,10 +134,18 @@ export function Field({ label, value, onChangeText, placeholder, multiline, secu
           placeholderTextColor={palette.inkFaint}
           multiline={multiline}
           secureTextEntry={secure}
+          autoFocus={autoFocus}
           autoCapitalize={autoCapitalize ?? 'none'}
           autoCorrect={false}
           keyboardType={keyboardType}
-          style={{ fontSize: sc.fs(14), color: palette.ink, padding: 0, textAlignVertical: multiline ? 'top' : 'center' }}
+          style={{
+            fontSize: sc.fs(14),
+            color: palette.ink,
+            padding: 0,
+            height: multiline ? undefined : sc.s(44),
+            textAlignVertical: multiline ? 'top' : 'center',
+            includeFontPadding: false,
+          }}
         />
       </View>
       {hint ? <Text style={{ marginTop: sc.s(5), fontSize: sc.fs(11), color: palette.inkFaint, lineHeight: sc.fs(15) }}>{hint}</Text> : null}
