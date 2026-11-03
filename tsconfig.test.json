@@ -12,5 +12,5 @@
     "resolveJsonModule": true,
     "jsx": "react"
   },
-  "include": ["src/lib/**/*", "src/data/seed.ts", "src/data/chatAppRegistry.ts", "src/services/relayApi.ts", "src/services/radarFeed.ts", "src/services/headlessCheckin.ts"]
+  "include": ["src/lib/**/*", "src/data/seed.ts", "src/data/chatAppRegistry.ts", "src/services/relayApi.ts", "src/services/radarFeed.ts", "src/services/headlessCheckin.ts", "src/lib/urlFallback.ts"]
 }

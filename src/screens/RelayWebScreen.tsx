@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Field, GlassButton, IconButton, KeyValue, Notice, Sheet } from '../components/Bits';
 import { normalizeUrl, siteKeyOf } from '../lib/normalize';
+import { fallbackChain } from '../lib/urlFallback';
 import { palette, radius } from '../theme/tokens';
 import { useScale } from '../theme/useScale';
 import { useKeyboardHeight } from '../theme/useKeyboard';
@@ -50,6 +51,9 @@ export function RelayWebScreen({ route, navigation }: any) {
   const [pasteOpen, setPasteOpen] = useState(false);
   const [httpError, setHttpError] = useState<number | null>(null);
   const retries = useRef(0);
+  const cands = useRef<string[]>([]);
+  const candIdx = useRef(0);
+  const errPending = useRef(false);
   const [pkLabel, setPkLabel] = useState('');
   const [pkKey, setPkKey] = useState('');
   const [pkBase, setPkBase] = useState(joinApiBase(initialUrl));
@@ -226,13 +230,34 @@ export function RelayWebScreen({ route, navigation }: any) {
     }
   };
 
-  const go = () => {
+  const go = (target?: string) => {
     setResult(null);
     autoRan.current = false;
-    const next = normalizeUrl(inputUrl);
+    const next = normalizeUrl(target ?? inputUrl);
+    cands.current = fallbackChain(next);
+    candIdx.current = 0;
+    errPending.current = false;
+    setHttpError(null);
     setUrl(next);
+    setInputUrl(next);
     setPkBase(joinApiBase(next));
     setLoading(true);
+  };
+
+  /** 5xx / 网络错误：沿回退链换地址重试，全部失败才报错 */
+  const handleLoadFailure = (code: number) => {
+    errPending.current = true;
+    const nextIdx = candIdx.current + 1;
+    if (nextIdx < cands.current.length) {
+      candIdx.current = nextIdx;
+      const next = cands.current[nextIdx];
+      setUrl(next);
+      setInputUrl(next);
+      setPkBase(joinApiBase(next));
+      setHttpError(null);
+      return;
+    }
+    setHttpError(code);
   };
 
   return (
@@ -251,7 +276,7 @@ export function RelayWebScreen({ route, navigation }: any) {
             <TextInput
               value={inputUrl}
               onChangeText={setInputUrl}
-              onSubmitEditing={go}
+              onSubmitEditing={() => go()}
               returnKeyType="go"
               autoCapitalize="none"
               autoCorrect={false}
@@ -262,7 +287,7 @@ export function RelayWebScreen({ route, navigation }: any) {
               style={{ flex: 1, marginLeft: sc.s(7), height: sc.s(38), fontSize: sc.fs(12.5), color: palette.ink, padding: 0, textAlignVertical: 'center', includeFontPadding: false }}
             />
           </View>
-          <GlassButton label="前往" size="sm" onPress={go} />
+          <GlassButton label="前往" size="sm" onPress={() => go()} />
         </View>
       </View>
 
@@ -310,7 +335,7 @@ export function RelayWebScreen({ route, navigation }: any) {
       {httpError ? (
         <View style={{ paddingHorizontal: sc.gutter, paddingTop: sc.s(8), backgroundColor: palette.dangerSoft }}>
           <Notice tone="danger" title={"站点返回 "}>
-            这是站点侧问题（Cloudflare 报告源站异常或网络不可达），不是 App 拦截。可重试，或改用系统浏览器打开后回到这里手动粘贴密钥。
+            已自动尝试过该地址的上级路径与站点根，仍打不开。这是站点侧问题（Cloudflare 报告源站异常或网络不可达），不是 App 拦截。可重试、改用系统浏览器打开，或直接手动粘贴密钥。
           </Notice>
           <View style={{ flexDirection: 'row', gap: sc.s(8), marginTop: sc.s(8), marginBottom: sc.s(8) }}>
             <GlassButton label="重试" icon="refresh" size="sm" onPress={() => { setHttpError(null); retries.current = 0; webRef.current?.reload(); }} />

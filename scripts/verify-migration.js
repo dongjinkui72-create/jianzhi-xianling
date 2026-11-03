@@ -91,3 +91,15 @@ console.log('✅ INSERT 列数/占位符静态检查通过（' + checked + ' 条
 assert.ok(/relay\.apiBase, relay\.checkinMode,/.test(src), 'upsertRelay 实参缺少 apiBase/checkinMode');
 assert.ok(/runChecked\(db,/.test(src), 'INSERT 必须走 runChecked 受检入口');
 console.log('✅ upsertRelay 实参完整性检查通过');
+// ---- 回退链：坏子路由应回退到站点根 ----
+const pathFB = require('path');
+const FB = require(pathFB.join(__dirname, '..', '.tmptest', 'lib', 'urlFallback.js'));
+t2('502 坏子路由的回退链正确', () => {
+  const chain = FB.fallbackChain('https://ly.77625.xyz/docs');
+  assert.deepStrictEqual(chain, ['https://ly.77625.xyz/docs', 'https://ly.77625.xyz/']);
+  const deep = FB.fallbackChain('https://a.b.com/x/y/z');
+  assert.deepStrictEqual(deep, ['https://a.b.com/x/y/z', 'https://a.b.com/x/y', 'https://a.b.com/x', 'https://a.b.com/']);
+});
+function t2(name, fn) {
+  try { fn(); console.log('  ✅ ' + name); } catch (e) { console.log('  ❌ ' + name + ' ' + e.message); process.exitCode = 1; }
+}
