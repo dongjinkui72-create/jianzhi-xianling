@@ -1,6 +1,6 @@
 {
   "name": "jianzhi-xianling",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "main": "index.ts",
   "dependencies": {
     "@expo/vector-icons": "^15.0.2",
@@ -36,7 +36,7 @@
   "scripts": {
     "start": "expo start",
     "typecheck": "tsc --noEmit",
-    "verify": "tsc -p tsconfig.test.json && node scripts/verify-core.js",
+    "verify": "tsc -p tsconfig.test.json && node scripts/verify-core.js && node scripts/verify-migration.js",
     "android": "expo run:android",
     "ios": "expo run:ios"
   },

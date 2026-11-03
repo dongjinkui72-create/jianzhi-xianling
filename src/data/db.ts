@@ -126,21 +126,40 @@ export async function getDb(): Promise<SQLite.SQLiteDatabase> {
     CREATE INDEX IF NOT EXISTS idx_keys_status ON api_keys(status);
     CREATE INDEX IF NOT EXISTS idx_logs_relay ON checkin_logs(relay_id, at DESC);
   `);
-  // 旧库迁移：补适配器新字段（新装用户不受影响）
-  for (const stmt of [
-    'ALTER TABLE relays ADD COLUMN api_base TEXT',
-    'ALTER TABLE relays ADD COLUMN checkin_mode TEXT',
-    'ALTER TABLE clients ADD COLUMN settings_template TEXT',
-    'ALTER TABLE clients ADD COLUMN settings_base TEXT',
-    'ALTER TABLE clients ADD COLUMN launch_template TEXT',
-    'ALTER TABLE clients ADD COLUMN browser_based INTEGER NOT NULL DEFAULT 0',
-    'ALTER TABLE clients ADD COLUMN note TEXT',
-    "ALTER TABLE clients ADD COLUMN source TEXT NOT NULL DEFAULT 'builtin'",
-  ]) {
+  // 旧库自愈式迁移：用 PRAGMA 实测每张表现有的列，缺哪列补哪列。
+  // 升级安装时 SQLite 文件保留，任何历史版本的库都能被修到当前 schema，
+  // 绝不做删表/清数据操作。
+  const EXPECTED_COLUMNS: Record<string, [string, string][]> = {
+    relays: [
+      ['api_base', 'TEXT'],
+      ['checkin_mode', 'TEXT'],
+    ],
+    clients: [
+      ['settings_template', 'TEXT'],
+      ['settings_base', 'TEXT'],
+      ['launch_template', 'TEXT'],
+      ['browser_based', 'INTEGER NOT NULL DEFAULT 0'],
+      ['note', 'TEXT'],
+      ['source', "TEXT NOT NULL DEFAULT 'builtin'"],
+    ],
+    benefits: [['evidence', 'TEXT']],
+    api_keys: [],
+  };
+  for (const table of Object.keys(EXPECTED_COLUMNS)) {
+    let have = new Set<string>();
     try {
-      await db.execAsync(stmt);
+      const info = await db.getAllAsync<{ name: string }>(`PRAGMA table_info(${table})`);
+      have = new Set(info.map((r) => r.name));
     } catch {
-      /* 列已存在则忽略 */
+      have = new Set();
+    }
+    for (const [name, ddl] of EXPECTED_COLUMNS[table]) {
+      if (have.has(name)) continue;
+      try {
+        await db.execAsync(`ALTER TABLE ${table} ADD COLUMN ${name} ${ddl}`);
+      } catch {
+        /* 并发或已存在时忽略 */
+      }
     }
   }
   // 2.0：元信息表。升级安装时 SQLite 文件与 SecureStore 都保留，
