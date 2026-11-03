@@ -6,6 +6,7 @@ import { Glass } from '../components/Glass';
 import { Header, ScreenShell } from '../components/Screen';
 import { compactNumber, dateTime, formatUsd, quotaToUsd, relativeTime, todayKey } from '../lib/format';
 import { siteKeyOf } from '../lib/normalize';
+import { splitRelaysForCheckin } from '../lib/relayGroups';
 import { palette } from '../theme/tokens';
 import { useScale } from '../theme/useScale';
 import { navigationRef } from '../navigation/navRef';
@@ -52,7 +53,7 @@ export function RelayScreen() {
   const [pkProtocol, setPkProtocol] = useState<ApiProtocol>('openai_compatible');
 
   // 只要登录过、存过长期凭据、或在本站存过 API Key，都算「已保存的站点」。
-  // 这样手动粘贴 Key 的站点也一定会出现在每日签到列表里。
+  // 这样手动粘贴 Key 的站点也一定会出现在本地已保存列表里。
   const saved = useMemo(
     () =>
       app.relays.filter(
@@ -60,8 +61,8 @@ export function RelayScreen() {
       ),
     [app.relays, app.keys],
   );
-  /** 每日签到列表：登录过的站点都会进这里；能不能签、怎么签由角标说明 */
-  const checkinList = useMemo(() => saved, [saved]);
+  /** 每日签到列表：只放已检测到免费签到入口的站点；没有签到功能的只留在下方本地列表。 */
+  const { checkin: checkinList } = useMemo(() => splitRelaysForCheckin(saved), [saved]);
   const directory = useMemo(() => app.relays.filter((r) => !saved.some((x) => x.id === r.id)), [app.relays, saved]);
   const today = todayKey();
   const todayDone = useMemo(
@@ -235,7 +236,7 @@ export function RelayScreen() {
           </View>
 
           <GlassButton
-            label={app.checkinBusy ? '签到中…' : `全部签到（${saved.length}）`}
+            label={app.checkinBusy ? '签到中…' : `全部签到（${checkinList.length}）`}
             icon="flash"
             size="lg"
             loading={app.checkinBusy}
@@ -246,7 +247,7 @@ export function RelayScreen() {
           {!checkinList.length ? (
             <View style={{ marginTop: sc.s(11) }}>
               <Notice tone="warn" title="还没有可签到的站点">
-                登录后 App 会自动检测该站有没有免费签到：有就加进这个列表，没有就只建档。
+                登录后 App 会自动检测免费签到：有签到入口的会出现在这里，没有签到的只保留在下方本地列表。
               </Notice>
             </View>
           ) : (

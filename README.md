@@ -8,6 +8,7 @@
 
 > 仓库：https://github.com/dongjinkui72-create/jianzhi-xianling  
 > 安装包：https://github.com/dongjinkui72-create/jianzhi-xianling/releases  
+> 最新版 v2.0.9：https://github.com/dongjinkui72-create/jianzhi-xianling/releases/tag/v2.0.9  
 >
 > **本软件永久免费、代码开源。如遇任何人以本软件名义收费，那就是你被骗了。** 觉得好用请到仓库点亮 Star。
 

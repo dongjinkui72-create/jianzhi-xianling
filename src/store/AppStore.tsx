@@ -7,6 +7,7 @@ import { SEED_RELAYS } from '../data/seed';
 import { delSecret, getSecret, putSecret } from '../data/vault';
 import { maskKey, quotaToUsd, todayKey, usdToTokensEstimate } from '../lib/format';
 import { normalizeUrl, siteKeyOf } from '../lib/normalize';
+import { hasCheckinCapability } from '../lib/relayGroups';
 import { secretRef, uid } from '../lib/id';
 import type { ApiKeyItem, ApiProtocol, AppSettings, Benefit, ChatClient, CheckinLog, Relay } from '../lib/types';
 import { detectClients, reconcileWithInstalled, shellCapabilityNote } from '../services/detectApps';
@@ -522,8 +523,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       usedQuota: selfRes.ok ? selfRes.self!.usedQuota : r.usedQuota,
       remainingUsd,
       remainingTokens: usdToTokensEstimate(remainingUsd),
-      checkinSupport: support.support,
-      checkinSupportNote: support.reason,
+      checkinSupport: support.support === 'yes'
+        ? 'yes'
+        : support.support === 'no'
+          ? 'no'
+          : hasCheckinCapability(r)
+            ? r.checkinSupport
+            : support.support,
+      checkinMode: support.support === 'yes' ? 'api' : support.support === 'no' ? null : r.checkinMode,
+      checkinSupportNote: support.support === 'yes'
+        ? null
+        : support.support === 'no'
+          ? support.reason
+          : hasCheckinCapability(r)
+            ? r.checkinSupportNote
+            : support.reason,
       lastSyncAt: Date.now(),
     };
     await DB.upsertRelay(next);
@@ -622,7 +636,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       try {
         const out: CheckinLog[] = [];
         const targets = relays.filter(
-          (r) => r.accessTokenRef || r.hasSession || keys.some((k) => k.relayId === r.id),
+          (r) => (r.accessTokenRef || r.hasSession || keys.some((k) => k.relayId === r.id)) && hasCheckinCapability(r),
         );
         for (const r of targets) {
           const t = transports?.[r.id] || relayTransport(r);

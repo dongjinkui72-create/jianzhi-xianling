@@ -24,7 +24,7 @@ import type { Relay } from '../lib/types';
  *  - 页面加载前注入网络探针，嗅探 SPA 真实调用的 API 根地址（公益站/路由站常常不在默认 /api 下）；
  *  - 逐个候选地址试读登录态，命中后用它建档；
  *  - 签到双通道：接口签到优先；接口 404 但主页有签到按钮时，自动点网页按钮完成签到；
- *  - 无论建档成败，只要读到登录态就把站点收进「每日签到」列表。
+ *  - 无论建档成败，只要读到登录态且检测到签到入口，就把站点收进「每日签到」列表。
  */
 
 interface AutoResult {
@@ -110,12 +110,20 @@ export function RelayWebScreen({ route, navigation }: any) {
       if (dom.ok) {
         const next = { ...relay, checkinSupport: 'yes' as const, checkinMode: 'dom' as const, checkinSupportNote: dom.message };
         await app.updateRelay(next);
-        return { mode: 'dom' as const, note: dom.message };
+        return { mode: 'dom' as const, note: dom.message, confirmed: true };
+      }
+      // 如果按钮存在，即使本次点击未确认成功，也应把该站放进每日签到列表。
+      const found = await domHasCheckinButton(bridge);
+      if (found.found) {
+        const note = dom.message || found.message;
+        const next = { ...relay, checkinSupport: 'yes' as const, checkinMode: 'dom' as const, checkinSupportNote: note };
+        await app.updateRelay(next);
+        return { mode: 'dom' as const, note, confirmed: false };
       }
       const explicitNo = support.support === 'no' && /未开启|未启用|已关闭|not enabled/i.test(support.reason || '');
       const next = { ...relay, checkinSupport: explicitNo ? ('no' as const) : ('unknown' as const), checkinMode: null, checkinSupportNote: dom.message || support.reason };
       await app.updateRelay(next);
-      return { mode: null, note: dom.message || support.reason };
+      return { mode: null, note: dom.message || support.reason, confirmed: false };
     },
     [app, bridge],
   );
@@ -166,10 +174,14 @@ export function RelayWebScreen({ route, navigation }: any) {
           const ck = await probeCheckin(relay);
           setResult({
             ok: ck.mode !== null,
-            title: ck.mode === 'api' ? '签到完成（接口）' : ck.mode === 'dom' ? '签到完成（网页按钮）' : '这个站没有可用的自动签到',
+            title: ck.mode === 'api'
+              ? '签到完成（接口）'
+              : ck.mode === 'dom'
+                ? ck.confirmed ? '签到完成（网页按钮）' : '已找到网页签到入口'
+                : '这个站没有可用的自动签到',
             lines: [
               { k: '站点', v: relay.name },
-              { k: '签到', v: ck.mode === 'api' ? '接口签到成功，已加入每日签到' : ck.mode === 'dom' ? '网页按钮签到成功，已加入每日签到' : `未能自动签到：${ck.note || '站点未开放'}` },
+              { k: '签到', v: ck.mode === 'api' ? '接口签到成功，已加入每日签到' : ck.mode === 'dom' ? ck.confirmed ? '网页按钮签到成功，已加入每日签到' : '检测到网页签到按钮，已加入每日签到；本次结果未确认' : `未能自动签到：${ck.note || '站点未开放'}` },
             ],
           });
           return;
@@ -188,7 +200,11 @@ export function RelayWebScreen({ route, navigation }: any) {
         }
         lines.push({
           k: '每日签到',
-          v: ck.mode === 'api' ? '有免费签到（接口），已加入每日签到' : ck.mode === 'dom' ? '有免费签到（网页按钮），已加入每日签到' : `未检测到免费签到：${ck.note || '站点未开放'}`,
+          v: ck.mode === 'api'
+            ? '有免费签到（接口），已加入每日签到'
+            : ck.mode === 'dom'
+              ? ck.confirmed ? '有免费签到（网页按钮），已加入每日签到' : '检测到网页签到入口，已加入每日签到；本次结果未确认'
+              : `未检测到免费签到：${ck.note || '站点未开放'}`,
         });
         setResult({
           ok: prov.ok,
@@ -271,7 +287,7 @@ export function RelayWebScreen({ route, navigation }: any) {
             }
           }
         } else {
-          checkedIn = '已加入每日签到；后台正在确认登录态';
+          checkedIn = '站点已保存到本地；正在后台确认签到能力';
         }
       } catch {
         /* 读不到就交给后台探测，不谎报已登录 */
@@ -290,7 +306,7 @@ export function RelayWebScreen({ route, navigation }: any) {
       lines: [
         { k: 'API 密钥', v: `${item.maskedKey}（已存本机加密区）` },
         { k: '调用地址', v: item.baseUrl },
-        { k: '每日签到', v: checkedIn || '站点已加入每日签到列表' },
+        { k: '每日签到', v: checkedIn || '站点已保存到本地；后台正在确认签到能力' },
       ],
     });
   };

@@ -330,7 +330,8 @@ export async function fetchCheckinSupport(t: Transport): Promise<CheckinSupport>
     };
   }
   if (sawNetworkError) return { support: 'unknown', reason: `网络不可达，无法确认：${sawNetworkError}`, minQuota: null, maxQuota: null };
-  return { support: 'no', reason: '该站点没有签到接口（HTTP 404），可能在网页按钮上', minQuota: null, maxQuota: null };
+  // 404 只能说明这个接口路径不存在，不能断言站点没有签到；很多公益站只在网页按钮上。
+  return { support: 'unknown', reason: '未找到签到接口，可能需要在网页按钮签到', minQuota: null, maxQuota: null };
 }
 
 /** 页面上是否存在「签到 / 已签到」按钮（只探测，不点击） */
@@ -398,6 +399,9 @@ export async function doCheckin(t: Transport): Promise<CheckinResult> {
   const support = await fetchCheckinSupport(t);
   if (support.support === 'no') {
     return { outcome: 'manual_only', message: support.reason || '该站点不支持自动签到，只能到站点页面手动签到', gainedUsd: null };
+  }
+  if (support.support !== 'yes') {
+    return { outcome: 'unconfirmed', message: support.reason || '签到接口无法确认，正在尝试网页按钮签到', gainedUsd: null };
   }
 
   const res = await t.request(support.path || '/api/user/checkin', { method: 'POST' });
