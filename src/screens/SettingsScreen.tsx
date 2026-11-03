@@ -157,7 +157,6 @@ export function SettingsScreen({ navigation }: any) {
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sc.s(5), marginTop: sc.s(4) }}>
             {c.source === 'feed' ? <Chip label="远程清单" tone="accent" /> : null}
           </View>
-          {c.note ? <Text style={{ marginTop: sc.s(3), fontSize: sc.fs(10), color: palette.inkFaint, lineHeight: sc.fs(14) }}>{c.note}</Text> : null}
 
         </View>
         <View style={{ gap: sc.s(5) }}>
@@ -332,7 +331,7 @@ export function SettingsScreen({ navigation }: any) {
 
       {/* 适配器清单地址 */}
       <Sheet visible={adapterSheetOpen} onClose={() => setAdapterSheetOpen(false)} title="添加适配器清单" footer={<GlassButton label="添加并拉取" icon="cloud-download-outline" size="lg" onPress={submitAdapterFeed} />}>
-        <Field label="清单 JSON 地址" value={feedUrl} onChangeText={setFeedUrl} placeholder="https://raw.githubusercontent.com/你的仓库/main/adapters/clients.json" keyboardType="url" autoCapitalize="none" hint="清单格式见 README「适配器清单」。" />
+        <Field label="清单 JSON 地址" value={feedUrl} onChangeText={setFeedUrl} placeholder="https://raw.githubusercontent.com/你的仓库/main/adapters/clients.json" keyboardType="url" autoCapitalize="none" />
       </Sheet>
 
       {/* base 地址编辑 */}

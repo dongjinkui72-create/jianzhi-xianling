@@ -7,6 +7,7 @@ import { Field, GlassButton, IconButton, KeyValue, Notice, Sheet } from '../comp
 import { normalizeUrl, siteKeyOf } from '../lib/normalize';
 import { palette, radius } from '../theme/tokens';
 import { useScale } from '../theme/useScale';
+import { useKeyboardHeight } from '../theme/useKeyboard';
 import { useApp } from '../store/AppStore';
 import { RelayBridge, SPY_JS } from '../services/relayBridge';
 import { deriveApiCandidates, detectRelayFamily, domCheckin, fetchCheckinSupport, fetchSelf, joinApiBase, type SelfInfo } from '../services/relayApi';
@@ -34,6 +35,7 @@ interface AutoResult {
 export function RelayWebScreen({ route, navigation }: any) {
   const sc = useScale();
   const insets = useSafeAreaInsets();
+  const kb = useKeyboardHeight();
   const app = useApp();
 
   const initialUrl = normalizeUrl(route?.params?.url || 'https://');
@@ -290,7 +292,7 @@ export function RelayWebScreen({ route, navigation }: any) {
       </View>
 
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <View style={{ paddingHorizontal: sc.gutter, paddingTop: sc.s(10), paddingBottom: insets.bottom + sc.s(12), backgroundColor: 'rgba(250,252,255,0.97)', borderTopWidth: 1, borderTopColor: palette.hairline, flexDirection: 'row', gap: sc.s(9) }}>
+        <View style={{ paddingHorizontal: sc.gutter, paddingTop: sc.s(10), paddingBottom: insets.bottom + sc.s(12) + kb, backgroundColor: 'rgba(250,252,255,0.97)', borderTopWidth: 1, borderTopColor: palette.hairline, flexDirection: 'row', gap: sc.s(9) }}>
           <View style={{ flex: 1 }}>
             <GlassButton label="手动粘贴密钥" icon="key-outline" tone="muted" size="lg" onPress={() => setPasteOpen(true)} style={{ width: '100%' } as any} />
           </View>

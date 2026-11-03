@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Glass } from './Glass';
 import { palette, radius, shadow } from '../theme/tokens';
 import { useScale } from '../theme/useScale';
+import { useKeyboardHeight } from '../theme/useKeyboard';
 
 export type Tone = 'ok' | 'warn' | 'danger' | 'accent' | 'muted';
 
@@ -197,11 +198,12 @@ export function Notice({ tone = 'muted', title, children }: { tone?: Tone; title
 /** 水晶玻璃底部弹层 */
 export function Sheet({ visible, onClose, title, children, footer, maxHeightRatio = 0.86 }: { visible: boolean; onClose: () => void; title?: string; children: React.ReactNode; footer?: React.ReactNode; maxHeightRatio?: number }) {
   const sc = useScale();
+  const kb = useKeyboardHeight();
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
       <View style={{ flex: 1, backgroundColor: 'rgba(13,27,42,0.34)', justifyContent: 'flex-end' }}>
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
-        <View style={{ maxHeight: sc.height * maxHeightRatio, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, overflow: 'hidden', backgroundColor: 'rgba(250,252,255,0.98)', borderWidth: 1, borderColor: palette.edge, ...(shadow.card as any) }}>
+        <View style={{ maxHeight: sc.height * maxHeightRatio, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, overflow: 'hidden', backgroundColor: 'rgba(250,252,255,0.98)', borderWidth: 1, borderColor: palette.edge, marginBottom: kb, ...(shadow.card as any) }}>
           <View style={{ alignItems: 'center', paddingTop: sc.s(9), paddingBottom: sc.s(4) }}>
             <View style={{ width: sc.s(38), height: sc.s(4.5), borderRadius: sc.s(3), backgroundColor: 'rgba(122,144,178,0.34)' }} />
           </View>

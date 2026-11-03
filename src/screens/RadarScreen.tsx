@@ -45,7 +45,7 @@ function MiniCard({ b, onPress }: { b: Benefit; onPress: () => void }) {
       <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: sc.s(7), gap: sc.s(4) }}>
         <Ionicons name="list-outline" size={sc.s(11)} color={palette.inkFaint} />
         <Text numberOfLines={1} style={{ flex: 1, fontSize: sc.fs(10), color: palette.inkFaint }}>
-          {b.steps.length} 步领取 · {relativeTime(b.fetchedAt)}
+          {relativeTime(b.fetchedAt)}
         </Text>
       </View>
     </Glass>

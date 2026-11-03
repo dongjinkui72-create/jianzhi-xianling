@@ -308,7 +308,6 @@ export function RelayScreen() {
                 <View style={{ flex: 1 }}>
                   <Text numberOfLines={1} style={{ fontSize: sc.fs(13.5), fontWeight: '700', color: palette.ink }}>{r.name}</Text>
                   <Text numberOfLines={1} style={{ fontSize: sc.fs(11), color: palette.inkFaint, marginTop: sc.s(2) }}>{r.baseUrl}</Text>
-                  {r.note ? <Text style={{ fontSize: sc.fs(10.5), color: palette.inkFaint, marginTop: sc.s(2) }}>{r.note}</Text> : null}
                 </View>
                 <GlassButton label="打开并登录" size="sm" icon="log-in-outline" onPress={() => openRelay(r)} />
               </View>
@@ -334,7 +333,7 @@ export function RelayScreen() {
       {/* 添加站点 */}
       <Sheet visible={addOpen} onClose={() => setAddOpen(false)} title="添加自定义中转站" footer={<GlassButton label="保存并打开登录" icon="log-in-outline" size="lg" onPress={submitAdd} />}>
         <Field label="站点名称" value={newName} onChangeText={setNewName} placeholder="例如：我的小站" />
-        <Field label="站点地址" value={newUrl} onChangeText={setNewUrl} placeholder="https://example.com" keyboardType="url" autoCapitalize="none" hint="填中转站控制台根地址即可，App 会自动归一化并补上 /v1 调用路径。" />
+        <Field label="站点地址" value={newUrl} onChangeText={setNewUrl} placeholder="https://example.com" keyboardType="url" autoCapitalize="none" />
       </Sheet>
 
       {/* 手动粘贴 */}
