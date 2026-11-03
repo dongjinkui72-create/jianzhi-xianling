@@ -10,8 +10,9 @@ import { palette, type ThemeName } from '../theme/tokens';
 import { useThemeName } from '../theme/ThemeProvider';
 import { useScale } from '../theme/useScale';
 import { canAutoImport } from '../services/launcher';
-import { isWhitelistCapableShell } from '../services/detectApps';
+import { CLIENT_LABEL_HINTS, isWhitelistCapableShell } from '../services/detectApps';
 import { appListAvailable, listInstalledApps, type InstalledApp } from '../native/installedApps';
+import { canOverlay, requestOverlay } from '../native/overlay';
 import { CHAT_APP_REGISTRY } from '../data/chatAppRegistry';
 import { useApp } from '../store/AppStore';
 import type { ChatClient } from '../lib/types';
@@ -34,7 +35,6 @@ export function SettingsScreen({ navigation }: any) {
   const [installedBusy, setInstalledBusy] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [note, setNote] = useState<string | null>(null);
-  const [baseEdit, setBaseEdit] = useState<{ id: string; value: string } | null>(null);
   const [q, setQ] = useState('');
   const theme = useThemeName();
 
@@ -107,29 +107,63 @@ export function SettingsScreen({ navigation }: any) {
 
   const addInstalled = async (a: InstalledApp) => {
     const matched = identify(a.packageName);
-    const kind = matched?.importKind ?? 'unconfirmed';
-    if (!matched || !canAutoImport(matched)) {
+    // 1) 有官方一键导入协议：直接添加
+    if (matched && canAutoImport(matched)) {
+      await app.addCustomClient({
+        name: a.label,
+        scheme: matched.scheme ?? '',
+        importKind: matched.importKind,
+        importTemplate: matched.importTemplate,
+        settingsTemplate: matched.settingsTemplate,
+        settingsBase: matched.settingsBase,
+        launchTemplate: matched.launchTemplate,
+        browserBased: matched.browserBased,
+        androidPackage: a.packageName,
+      });
       setInstalledOpen(false);
-      setNote(
-        matched
-          ? `已识别「${a.label}」，但它的导入能力是「${matched.importKind === 'launch_only' ? '仅能打开' : '无法确认'}」，不属于可导入软件，因此不会出现在列表里。`
-          : `已识别「${a.label}」，但适配器登记表里还没有它的导入协议，标为「无法确认」。等远程清单补上后会自动生效。`,
-      );
+      setNote(`已添加「${a.label}」，导入方式由 App 自动识别为：${matched.importKind === 'deeplink_import' ? 'deep link 直写' : 'URL 参数写入'}。`);
+      await app.rescanClients();
       return;
     }
-    await app.addCustomClient({
-      name: a.label,
-      scheme: matched.scheme ?? '',
-      importKind: matched.importKind,
-      importTemplate: matched.importTemplate,
-      settingsTemplate: matched.settingsTemplate,
-      settingsBase: matched.settingsBase,
-      launchTemplate: matched.launchTemplate,
-      browserBased: matched.browserBased,
-    });
+    // 2) 已登记但没有自动导入协议（如 TauriTavern / 酒馆）：回填包名，启动时先拉起 App，再用悬浮窗送达
+    if (matched && matched.importKind === 'unconfirmed') {
+      const cur = app.clients.find((c) => c.id === matched.id);
+      if (cur) {
+        await app.updateClient({ ...cur, androidPackage: a.packageName, detected: 'installed', detectReason: '从本机已安装应用列表添加' });
+      } else {
+        await app.addCustomClient({
+          name: a.label,
+          scheme: matched.scheme ?? '',
+          importKind: 'unconfirmed',
+          androidPackage: a.packageName,
+        });
+      }
+      setInstalledOpen(false);
+      setNote(`已添加「${a.label}」：启动时先打开它，再用悬浮窗把地址和密钥送达。`);
+      await app.rescanClients();
+      return;
+    }
+    // 3) 未登记，但名称像开源 AI 聊天 / 酒馆 / 角色聊天软件：自动建档为悬浮窗送达
+    const hay = `${a.label} ${a.packageName}`.toLowerCase();
+    if (CLIENT_LABEL_HINTS.some((h) => hay.includes(h))) {
+      await app.addCustomClient({
+        name: a.label,
+        scheme: '',
+        importKind: 'unconfirmed',
+        androidPackage: a.packageName,
+      });
+      setInstalledOpen(false);
+      setNote(`已识别「${a.label}」为可导入的 AI 聊天软件：启动时先打开它，再用悬浮窗送达地址与密钥。`);
+      await app.rescanClients();
+      return;
+    }
+    // 4) 大厂官方 App 等确实不接受第三方密钥的软件，如实说明
     setInstalledOpen(false);
-    setNote(`已添加「${a.label}」，导入方式由 App 自动识别为：${matched.importKind === 'deeplink_import' ? 'deep link 直写' : 'URL 参数写入'}。`);
-    await app.rescanClients();
+    setNote(
+      matched && matched.importKind === 'launch_only'
+        ? `「${a.label}」不接受第三方 API 密钥，导入密钥在它身上不存在，因此不加入导入列表。`
+        : `没有在「${a.label}」里识别到可导入 API 的入口，已按红线如实说明，不加入列表。`,
+    );
   };
 
   const ClientRow = ({ c }: { c: ChatClient }) => {
@@ -184,13 +218,7 @@ export function SettingsScreen({ navigation }: any) {
             <GlassButton label="安装 Chatbox" icon="download-outline" size="sm" tone="ok" onPress={() => Linking.openURL('https://chatboxai.app/').catch(() => {})} />
           </View>
 
-          <SwitchRow
-            title="每次都让我选用哪个软件"
-            desc="关掉后，若已设置「默认启动」，点启动按钮会直接拉起它"
-            value={app.settings.alwaysAskClient}
-            onValueChange={(v) => app.patchSettings({ alwaysAskClient: v })}
-          />
-          <KeyValue k="当前默认" v={preferred ? preferred.name : '未设置（每次自选）'} />
+          <KeyValue k="当前默认" v={preferred ? preferred.name : '未配置（启动按钮保持灰色）'} />
 
           <View style={{ marginTop: sc.s(6) }}>
             {importable.map((c) => (
@@ -209,6 +237,24 @@ export function SettingsScreen({ navigation }: any) {
                       <Text numberOfLines={1} style={{ fontSize: sc.fs(10), color: palette.inkFaint }}>{c.androidPackage}</Text>
                     </View>
                     <Chip label="悬浮窗送达" tone="warn" />
+                    <GlassButton
+                      label={app.settings.preferredClientId === c.id ? '取消' : '设为默认'}
+                      size="sm"
+                      tone={app.settings.preferredClientId === c.id ? 'muted' : 'accent'}
+                      onPress={async () => {
+                        if (app.settings.preferredClientId === c.id) {
+                          await app.patchSettings({ preferredClientId: null });
+                          return;
+                        }
+                        await app.patchSettings({ preferredClientId: c.id });
+                        if (!(await canOverlay())) {
+                          setNote('已设为默认。该软件不能自动导入，请授权「显示在其他应用上层」，启动时会用悬浮窗送达密钥。');
+                          await requestOverlay();
+                        } else {
+                          setNote(`已把「${c.name}」设为默认启动软件。`);
+                        }
+                      }}
+                    />
                     {c.source === 'auto' ? <IconButton icon="trash-outline" size={15} tone="danger" onPress={() => app.removeCustomClient(c.id)} /> : null}
                   </View>
                 ))}
@@ -343,30 +389,10 @@ export function SettingsScreen({ navigation }: any) {
           );
         })}
         {q.trim() && !installedBusy && matches.apps.length === 0 && matches.seeds.length === 0 ? (
-          <Notice tone="warn">没搜到匹配的软件。换个关键词，或在「导入适配器清单」里补它的协议。</Notice>
+          <Notice tone="warn">没搜到匹配的软件。换个名称或包名关键词再试一次。</Notice>
         ) : null}      </Sheet>
 
-      {/* base 地址编辑 */}
-      <Sheet
-        visible={!!baseEdit}
-        onClose={() => setBaseEdit(null)}
-        title="修改 base 地址"
-        footer={
-          <GlassButton
-            label="保存"
-            icon="save-outline"
-            size="lg"
-            onPress={async () => {
-              if (!baseEdit) return;
-              const target = app.clients.find((x) => x.id === baseEdit.id);
-              if (target) await app.updateClient({ ...target, settingsBase: baseEdit.value.trim() || target.settingsBase });
-              setBaseEdit(null);
-            }}
-          />
-        }
-      >
-        <Field label="base 地址" value={baseEdit?.value || ''} onChangeText={(t) => setBaseEdit((b) => (b ? { ...b, value: t } : b))} placeholder="https://your-lobechat.example.com" keyboardType="url" autoCapitalize="none" />
-      </Sheet>
+
     </ScreenShell>
   );
 }

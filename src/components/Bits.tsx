@@ -130,7 +130,7 @@ export function Field({ label, value, onChangeText, placeholder, multiline, secu
           {right}
         </View>
       ) : null}
-      <View style={{ borderRadius: radius.md, borderWidth: 1, borderColor: palette.hairline, backgroundColor: palette.inputBg, paddingHorizontal: sc.s(12), paddingVertical: multiline ? sc.s(8) : 0, minHeight: multiline ? sc.s(84) : sc.s(46), justifyContent: 'center' }}>
+      <View style={{ borderRadius: radius.md, borderWidth: 1, borderColor: palette.hairline, backgroundColor: palette.inputBg, paddingHorizontal: sc.s(12), paddingVertical: multiline ? sc.s(8) : 0, minHeight: multiline ? sc.s(84) : sc.s(48), justifyContent: 'center' }}>
         <TextInput
           value={value}
           onChangeText={onChangeText}
@@ -146,7 +146,9 @@ export function Field({ label, value, onChangeText, placeholder, multiline, secu
             fontSize: sc.fs(14),
             color: palette.ink,
             padding: 0,
-            height: multiline ? undefined : sc.s(44),
+            paddingVertical: 0,
+            height: multiline ? undefined : sc.s(46),
+            lineHeight: multiline ? undefined : sc.fs(20),
             textAlignVertical: multiline ? 'top' : 'center',
             includeFontPadding: false,
           }}
@@ -206,7 +208,7 @@ export function Sheet({ visible, onClose, title, children, footer, maxHeightRati
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
       <View style={{ flex: 1, backgroundColor: 'rgba(13,27,42,0.34)', justifyContent: 'flex-end' }}>
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
-        <View style={{ maxHeight: sc.height * maxHeightRatio, borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, overflow: 'hidden', backgroundColor: palette.sheetBg, borderWidth: 1, borderColor: palette.edge, marginBottom: kb, ...(shadow.card as any) }}>
+        <View style={{ maxHeight: Math.max(sc.s(220), sc.height * maxHeightRatio - kb), borderTopLeftRadius: radius.xl, borderTopRightRadius: radius.xl, overflow: 'hidden', backgroundColor: palette.sheetBg, borderWidth: 1, borderColor: palette.edge, marginBottom: kb, ...(shadow.card as any) }}>
           <View style={{ alignItems: 'center', paddingTop: sc.s(9), paddingBottom: sc.s(4) }}>
             <View style={{ width: sc.s(38), height: sc.s(4.5), borderRadius: sc.s(3), backgroundColor: 'rgba(122,144,178,0.34)' }} />
           </View>

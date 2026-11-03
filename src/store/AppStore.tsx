@@ -14,7 +14,7 @@ import { listInstalledApps } from '../native/installedApps';
 import { checkKeyHealth } from '../services/healthCheck';
 import { offlineBenefits, refreshRadar, type FetchReport } from '../services/radarFeed';
 import { fetchAdapters, OFFICIAL_ADAPTER_FEED } from '../services/adapterFeed';
-import { headlessCheckin } from '../services/headlessCheckin';
+import { headlessCheckin, headlessProbeSite } from '../services/headlessCheckin';
 import { autoProvisionApiKey, createSystemAccessToken, doCheckin, fetchCheckinSupport, fetchSelf, httpTransport, joinApiBase, type Transport } from '../services/relayApi';
 
 interface NewKeyInput {
@@ -62,6 +62,7 @@ interface StoreValue {
   provisionRelay: (r: Relay, t: Transport, label?: string) => Promise<{ ok: boolean; message: string; key?: ApiKeyItem | null }>;
   persistAccessToken: (r: Relay, t: Transport) => Promise<{ ok: boolean; message: string }>;
   syncRelay: (r: Relay) => Promise<Relay>;
+  probeRelay: (r: Relay) => Promise<Relay>;
   checkinRelay: (r: Relay, transport?: Transport) => Promise<CheckinLog>;
   checkinAll: (transports?: Record<string, Transport>) => Promise<CheckinLog[]>;
 
@@ -78,6 +79,7 @@ interface StoreValue {
     settingsBase?: string;
     launchTemplate?: string;
     browserBased?: boolean;
+    androidPackage?: string | null;
   }) => Promise<void>;
   removeCustomClient: (id: string) => Promise<void>;
 }
@@ -117,9 +119,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       try {
         await DB.getDb();
         const s = await DB.loadSettings();
-        const boot = s.preferredClientId == null ? { ...s, preferredClientId: 'chatbox' } : s;
-        if (boot.preferredClientId !== s.preferredClientId) await DB.saveSettings({ preferredClientId: 'chatbox' });
-        setSettings(boot);
+        // 不自动替用户选软件：没配置时启动按钮保持灰色，由用户在设置里明确选择
+        setSettings(s);
 
         // 聊天软件登记表：首次写入内置清单
         let cs = await DB.listClients();
@@ -393,6 +394,30 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setRelays(await DB.listRelays());
   }, []);
 
+  /** 登录/粘贴 Key 后：后台读登录态、API 根与签到方式，把站点收进每日签到 */
+  const probeRelay = useCallback(async (r: Relay): Promise<Relay> => {
+    const p = await headlessProbeSite(r);
+    const remainingUsd = p.self ? quotaToUsd(p.self.quota) : r.remainingUsd;
+    const next: Relay = {
+      ...r,
+      hasSession: p.session || r.hasSession,
+      apiBase: p.apiBase ?? r.apiBase,
+      userId: p.self?.id ?? r.userId,
+      username: p.self?.username ?? r.username,
+      quota: p.self?.quota ?? r.quota,
+      usedQuota: p.self?.usedQuota ?? r.usedQuota,
+      remainingUsd,
+      remainingTokens: p.self ? usdToTokensEstimate(remainingUsd) : r.remainingTokens,
+      checkinSupport: p.session ? p.checkinSupport : r.checkinSupport,
+      checkinMode: p.session ? p.checkinMode : r.checkinMode,
+      checkinSupportNote: p.session ? p.note : p.note || r.checkinSupportNote,
+      lastSyncAt: Date.now(),
+    };
+    await DB.upsertRelay(next);
+    setRelays(await DB.listRelays());
+    return next;
+  }, []);
+
   /** 已保存长期访问令牌时，可在 App 侧直接代理请求（无需打开 WebView） */
   const relayTransport = useCallback(
     (r: Relay): Transport | null => {
@@ -428,7 +453,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   /** 核心功能①：自动建档 API Key 并落库 */
   const provisionRelay = useCallback(
     async (r: Relay, t: Transport, label?: string) => {
-      const res = await autoProvisionApiKey(t, r.baseUrl, label || r.name);
+      // 用嗅探出的真实 API 根（如 /apiroot），而不是页面地址（如 /docs）
+      const res = await autoProvisionApiKey(t, r.apiBase || r.baseUrl, label || r.name);
       const trace = res.trace?.join('\n') || '';
       if (!res.ok || !res.key || !res.apiBase) {
         const support: Relay = {
@@ -528,29 +554,57 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       let message: string;
       let gained: number | null = null;
 
+      let hb: Awaited<ReturnType<typeof headlessCheckin>> | null = null;
       if (useApi) {
         const res = await doCheckin(t);
         outcome = res.outcome;
         message = res.message;
         gained = res.gainedUsd;
         if (res.outcome === 'unconfirmed') {
-          const hb = await headlessCheckin(r);
+          hb = await headlessCheckin(r);
           outcome = hb.outcome;
           message = hb.message;
         }
       } else {
         // 无长期凭据 / 签到在网页按钮上：后台隐形 WebView 一键完成，不跳转界面
-        const hb = await headlessCheckin(r);
+        hb = await headlessCheckin(r);
         outcome = hb.outcome;
         message = hb.message;
       }
 
+      const p = hb?.probe;
+      const basePatch: Partial<Relay> = p?.session
+        ? {
+            hasSession: true,
+            apiBase: p.apiBase ?? r.apiBase,
+            userId: p.self?.id ?? r.userId,
+            username: p.self?.username ?? r.username,
+            quota: p.self?.quota ?? r.quota,
+            usedQuota: p.self?.usedQuota ?? r.usedQuota,
+            remainingUsd: p.self ? quotaToUsd(p.self.quota) : r.remainingUsd,
+            remainingTokens: p.self ? usdToTokensEstimate(quotaToUsd(p.self.quota)) : r.remainingTokens,
+            checkinSupport: p.checkinSupport,
+            checkinMode: hb?.mode ?? p.checkinMode,
+            checkinSupportNote: p.note,
+          }
+        : {};
+
       if (outcome === 'success') {
-        await DB.upsertRelay({ ...r, lastCheckinAt: Date.now(), lastSyncAt: Date.now() });
+        await DB.upsertRelay({
+          ...r,
+          ...basePatch,
+          checkinSupport: 'yes',
+          checkinMode: hb?.mode ?? r.checkinMode,
+          checkinSupportNote: null,
+          lastCheckinAt: Date.now(),
+          lastSyncAt: Date.now(),
+        });
         setRelays(await DB.listRelays());
-      }
-      if (outcome === 'manual_only' || outcome === 'unconfirmed') {
-        await DB.upsertRelay({ ...r, checkinSupport: outcome === 'manual_only' ? 'no' : 'unknown', checkinSupportNote: message });
+      } else if (outcome === 'manual_only' || outcome === 'unconfirmed') {
+        await DB.upsertRelay({ ...r, ...basePatch, checkinSupportNote: message });
+        setRelays(await DB.listRelays());
+      } else {
+        await DB.upsertRelay({ ...r, ...basePatch });
         setRelays(await DB.listRelays());
       }
       return writeLog(r, outcome, message, gained);
@@ -562,21 +616,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setCheckinBusy(true);
       try {
         const out: CheckinLog[] = [];
-        const targets = relays.filter((r) => r.accessTokenRef || r.hasSession);
+        const targets = relays.filter(
+          (r) => r.accessTokenRef || r.hasSession || keys.some((k) => k.relayId === r.id),
+        );
         for (const r of targets) {
           const t = transports?.[r.id] || relayTransport(r);
-          if (!t) {
-            out.push(await writeLog(r, 'manual_only', '该站还没存长期凭据或签到在网页按钮上：在「每日签到」里点它那一行的『去签到』即可一键完成（如实提示，未伪造成功）', null));
-            continue;
-          }
-          out.push(await checkinRelay(r, t));
+          // 没有长期凭据也照样走后台隐形 WebView（与登录 WebView 共享 Cookie），
+          // 不能直接判成「只能手动」。
+          out.push(await checkinRelay(r, t || undefined));
         }
         return out;
       } finally {
         setCheckinBusy(false);
       }
     },
-    [relays, relayTransport, checkinRelay, writeLog],
+    [relays, keys, relayTransport, checkinRelay, writeLog],
   );
 
   /* ------------------------------ 远程适配器清单 ------------------------------ */
@@ -653,13 +707,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       settingsBase?: string;
       launchTemplate?: string;
       browserBased?: boolean;
+      androidPackage?: string | null;
     }) => {
       const id = `custom_${uid('c')}`.replace(/[^A-Za-z0-9_]/g, '_');
       const c: ChatClient = {
         id,
         name: input.name.trim() || '自定义软件',
         scheme: input.scheme.trim().replace(/:\/+$/, '') || null,
-        androidPackage: null,
+        androidPackage: input.androidPackage || null,
         iosBundleId: null,
         importKind: input.importKind,
         importTemplate: input.importTemplate || undefined,
@@ -669,8 +724,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         browserBased: !!input.browserBased,
         platform: 'all',
         builtin: false,
-        detected: 'unknown',
-        detectReason: '自定义条目，未扫描',
+        detected: input.androidPackage ? 'installed' : 'unknown',
+        detectReason: input.androidPackage ? '从本机已安装应用列表添加' : '自定义条目，未扫描',
         addedAt: Date.now(),
         source: 'custom',
       };
@@ -717,6 +772,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       provisionRelay,
       persistAccessToken,
       syncRelay,
+      probeRelay,
       checkinRelay,
       checkinAll,
       rescanClients,
@@ -731,7 +787,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       radarBusy, radarStage, healthBusy, checkinBusy, selectedKeyId, scanNote,
       patchSettings, doRefreshRadar, selectKey, addKey, updateKey, removeKey,
       runHealthCheck, getSecretOf, addRelayByUrl, updateRelay, removeRelay,
-      relayTransport, provisionRelay, persistAccessToken, syncRelay,
+      relayTransport, provisionRelay, persistAccessToken, syncRelay, probeRelay,
       checkinRelay, checkinAll, rescanClients, refreshAdapters, adapterNotes, updateClient,
       addCustomClient, removeCustomClient,
     ],

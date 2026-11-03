@@ -61,6 +61,12 @@ const URL_SCHEMES = [
   'boltai',
   'chatwise',
   'cherrystudio',
+  'deepchat',
+  'tauritavern',
+  'sillytavern',
+  'risu',
+  'chatterui',
+  'janitor',
 ];
 
 function ensureArray(node, key) {

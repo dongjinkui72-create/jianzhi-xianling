@@ -23,9 +23,14 @@ export const SPY_JS = `;(function(){
   var rec = function(u){
     try {
       if (typeof u !== 'string') return;
-      var i = u.indexOf('/api/');
+      // 相对地址（/apiroot/api/...）先补全成绝对地址，否则前缀会被丢掉
+      var abs = u;
+      if (!/^https?:\/\//i.test(abs)) {
+        try { abs = new URL(abs, location.href).toString(); } catch (e) { if (abs.charAt(0) === '/') abs = location.origin + abs; }
+      }
+      var i = abs.indexOf('/api/');
       if (i < 0) return;
-      var base = u.slice(0, i);
+      var base = abs.slice(0, i);
       if (!base || window.__jzApis.indexOf(base) !== -1) return;
       if (window.__jzApis.length < 30) window.__jzApis.push(base);
     } catch (e) {}
@@ -50,6 +55,8 @@ export class RelayBridge implements Transport {
   private origin: string | null = null;
   /** 探针嗅探到的真实 API 根地址（可能与页面 origin 不同） */
   private apiBase: string | null = null;
+  /** New API 部分部署要求 New-Api-User 头；从页面 localStorage 读到的用户 ID */
+  private userId: string | null = null;
   private pending = new Map<string, (r: RelayResponse) => void>();
   private timers = new Map<string, any>();
 
@@ -69,6 +76,14 @@ export class RelayBridge implements Transport {
 
   get currentApiBase(): string | null {
     return this.apiBase;
+  }
+
+  setUserId(id: string | number | null) {
+    this.userId = id == null || id === '' ? null : String(id);
+  }
+
+  get currentUserId(): string | null {
+    return this.userId;
   }
 
   setOrigin(url: string | null) {
@@ -141,9 +156,12 @@ export class RelayBridge implements Transport {
     }
 
     const rid = uid('rq');
-    const url = path.startsWith('http') ? path : `${this.origin}${path.startsWith('/') ? '' : '/'}${path}`;
+    // 请求根优先用嗅探出来的真实 API 根（公益站常见 api.xxx 子域 / 非 /api 前缀）
+    const base = this.apiBase || this.origin;
+    const url = path.startsWith('http') ? path : `${base}${path.startsWith('/') ? '' : '/'}${path}`;
     const method = (init.method || 'GET').toUpperCase();
     const headers: Record<string, string> = { Accept: 'application/json', ...(init.headers || {}) };
+    if (this.userId) headers['New-Api-User'] = this.userId;
     let bodyLiteral = 'null';
     if (init.body != null) {
       headers['Content-Type'] = 'application/json';
@@ -192,6 +210,20 @@ export class RelayBridge implements Transport {
         resolve({ ok: false, status: 0, error: `注入失败：${e?.message || e}` });
       }
     });
+  }
+
+  /** 汇总页面探针 + 浏览器 performance 里的 API 请求地址（双保险，防止探针漏记） */
+  async collectApiHints(): Promise<string[]> {
+    const a = await this.eval('(window.__jzApis || [])', 8000);
+    const b = await this.eval(
+      `(function(){try{return performance.getEntriesByType('resource').map(function(e){return e.name;}).filter(function(n){return n.indexOf('/api')>=0;}).slice(0,80);}catch(e){return [];}})()`,
+      8000,
+    );
+    const out: string[] = [];
+    for (const arr of [a, b]) {
+      if (Array.isArray(arr)) for (const v of arr) if (typeof v === 'string' && out.indexOf(v) === -1) out.push(v);
+    }
+    return out;
   }
 
   /** 在页面里求值（支持 Promise），用于读取探针记录 / 操作 DOM */

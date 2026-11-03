@@ -201,7 +201,7 @@ export function PoolScreen() {
                 剩余额度 {quotaLine(selected)} · {apiHostFor(selected)}
               </Text>
               <Text style={{ marginTop: sc.s(6), fontSize: sc.fs(11.5), color: palette.accent, fontWeight: '700', textAlign: 'center' }}>
-                点右下角悬浮启动按钮，密钥与调用地址全自动导入
+                点右下角启动按钮：打开已配置软件，能自动导入就自动写入，否则用悬浮窗送达
               </Text>
             </>
           ) : (
@@ -211,7 +211,7 @@ export function PoolScreen() {
                 <Text style={{ fontSize: sc.fs(14), fontWeight: '800', color: palette.inkSoft }}>未选择 API</Text>
               </View>
               <Text style={{ marginTop: sc.s(5), fontSize: sc.fs(11), color: palette.inkFaint, textAlign: 'center', lineHeight: sc.fs(16) }}>
-                展开「绿色可用」选中一条 API，{'\n'}右下角悬浮启动按钮就会亮起
+                先在「设置」里配置 AI 聊天软件，{'\n'}再展开「绿色可用」选中一条 API，启动按钮才会亮起
               </Text>
               {launchEnabledReason ? <Text style={{ marginTop: sc.s(4), fontSize: sc.fs(10), color: palette.inkFaint, textAlign: 'center' }}>{launchEnabledReason}</Text> : null}
             </>

@@ -11,7 +11,8 @@ import { useScale } from '../theme/useScale';
 import { useKeyboardHeight } from '../theme/useKeyboard';
 import { useApp } from '../store/AppStore';
 import { RelayBridge, SPY_JS } from '../services/relayBridge';
-import { deriveApiCandidates, detectRelayFamily, domCheckin, fetchCheckinSupport, fetchSelf, joinApiBase, type SelfInfo } from '../services/relayApi';
+import { deriveApiCandidates, detectRelayFamily, domCheckin, domHasCheckinButton, fetchCheckinSupport, fetchSelf, joinApiBase, readLocalUserId, type SelfInfo } from '../services/relayApi';
+import { quotaToUsd, usdToTokensEstimate } from '../lib/format';
 import type { Relay } from '../lib/types';
 
 /**
@@ -80,7 +81,10 @@ export function RelayWebScreen({ route, navigation }: any) {
 
   /** 嗅探真实 API 根并读取登录态 */
   const discover = useCallback(async (): Promise<{ self: SelfInfo | null; apiBase: string | null; tried: string[] }> => {
-    const hints = await bridge.eval('(window.__jzApis || [])');
+    // 部分 New API 部署的接口要求 New-Api-User 头，先从页面 localStorage 取用户 ID
+    const localUid = await readLocalUserId(bridge);
+    if (localUid) bridge.setUserId(localUid);
+    const hints = await bridge.collectApiHints();
     const cands = deriveApiCandidates(hints, bridge.currentOrigin);
     const tried: string[] = [];
     for (const c of cands) {
@@ -141,7 +145,7 @@ export function RelayWebScreen({ route, navigation }: any) {
         const fam = await detectRelayFamily(bridge);
         const relay: Relay = {
           ...relay0,
-          apiBase: apiBase && apiBase !== bridge.currentOrigin ? apiBase : relay0.apiBase,
+          apiBase: apiBase ?? relay0.apiBase,
           hasSession: true,
           kind: fam.family === 'unknown' ? relay0.kind : fam.family,
           userId: self.id,
@@ -206,28 +210,76 @@ export function RelayWebScreen({ route, navigation }: any) {
       return;
     }
     const relay = await ensureRelay();
+    const base = pkBase.trim();
     const item = await app.addKey({
       label: pkLabel.trim() || `${relay.name} · 手动导入`,
       key: pkKey.trim(),
-      baseUrl: pkBase.trim(),
+      baseUrl: base,
       provider: relay.name,
       protocol: 'openai_compatible',
       relayId: relay.id,
       source: 'manual',
     });
-    if (item) await app.updateRelay({ ...relay, hasSession: true });
     setPasteOpen(false);
-    if (item) {
-      setResult({
-        ok: true,
-        title: '已保存到本机',
-        lines: [
-          { k: 'API 密钥', v: `${item.maskedKey}（已存本机加密区）` },
-          { k: '调用地址', v: item.baseUrl },
-          { k: '每日签到', v: '站点已收进每日签到列表，签到能力以列表标注为准' },
-        ],
-      });
+    if (!item) return;
+
+    // 保存后立刻用当前登录页的 Cookie 读取账号与签到方式（页面内 fetch，最可靠）
+    let next: Relay = { ...relay, apiBase: relay.apiBase || base };
+    let checkedIn = '';
+    if (bridge.ready) {
+      try {
+        const d = await discover();
+        if (d.self) {
+          const usd = quotaToUsd(d.self.quota);
+          next = {
+            ...next,
+            hasSession: true,
+            apiBase: d.apiBase || next.apiBase,
+            userId: d.self.id,
+            username: d.self.username,
+            quota: d.self.quota,
+            usedQuota: d.self.usedQuota,
+            remainingUsd: usd,
+            remainingTokens: usdToTokensEstimate(usd),
+            lastSyncAt: Date.now(),
+          };
+          const support = await fetchCheckinSupport(bridge);
+          if (support.support === 'yes') {
+            next = { ...next, checkinSupport: 'yes', checkinMode: 'api', checkinSupportNote: null };
+            checkedIn = '支持接口一键签到，已加入每日签到';
+          } else {
+            const dom = await domHasCheckinButton(bridge);
+            if (dom.found) {
+              next = { ...next, checkinSupport: 'yes', checkinMode: 'dom', checkinSupportNote: dom.message };
+              checkedIn = '支持网页按钮一键签到，已加入每日签到';
+            } else {
+              next = { ...next, checkinSupport: support.support, checkinMode: null, checkinSupportNote: support.reason || dom.message };
+              checkedIn = support.support === 'no' ? '该站没有自动签到入口' : '签到方式无法确认';
+            }
+          }
+        } else {
+          checkedIn = '已加入每日签到；后台正在确认登录态';
+        }
+      } catch {
+        /* 读不到就交给后台探测，不谎报已登录 */
+      }
     }
+    relayRef.current = next;
+    await app.updateRelay(next);
+    if (!next.username) {
+      // 页面内读不到就交给后台隐形 WebView 再确认一次
+      app.probeRelay(next).catch(() => {});
+    }
+
+    setResult({
+      ok: true,
+      title: '已保存到本机',
+      lines: [
+        { k: 'API 密钥', v: `${item.maskedKey}（已存本机加密区）` },
+        { k: '调用地址', v: item.baseUrl },
+        { k: '每日签到', v: checkedIn || '站点已加入每日签到列表' },
+      ],
+    });
   };
 
   const go = (target?: string) => {

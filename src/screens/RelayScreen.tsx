@@ -51,10 +51,18 @@ export function RelayScreen() {
   const [pkBase, setPkBase] = useState('');
   const [pkProtocol, setPkProtocol] = useState<ApiProtocol>('openai_compatible');
 
-  const saved = useMemo(() => app.relays.filter((r) => r.hasSession || r.userId || r.accessTokenRef), [app.relays]);
+  // 只要登录过、存过长期凭据、或在本站存过 API Key，都算「已保存的站点」。
+  // 这样手动粘贴 Key 的站点也一定会出现在每日签到列表里。
+  const saved = useMemo(
+    () =>
+      app.relays.filter(
+        (r) => r.hasSession || r.userId || r.accessTokenRef || app.keys.some((k) => k.relayId === r.id),
+      ),
+    [app.relays, app.keys],
+  );
   /** 每日签到列表：登录过的站点都会进这里；能不能签、怎么签由角标说明 */
   const checkinList = useMemo(() => saved, [saved]);
-  const directory = useMemo(() => app.relays.filter((r) => !(r.hasSession || r.userId || r.accessTokenRef)), [app.relays]);
+  const directory = useMemo(() => app.relays.filter((r) => !saved.some((x) => x.id === r.id)), [app.relays, saved]);
   const today = todayKey();
   const todayDone = useMemo(
     () => {
@@ -106,7 +114,15 @@ export function RelayScreen() {
     setBusyId(r.id);
     try {
       if (!r.accessTokenRef) {
-        setToast({ tone: 'warn', title: '还没有长期登录凭据', body: '请先点「打开并登录」在网页里登录一次；App 会尝试保存长期访问令牌，之后就能直接同步余额和代理签到。' });
+        // 没有长期令牌：用与登录页共享 Cookie 的后台 WebView 读余额与签到方式
+        const next = await app.probeRelay(r);
+        setToast({
+          tone: next.hasSession ? 'ok' : 'warn',
+          title: next.hasSession ? `${next.name} 已同步` : `${next.name} 未读到登录态`,
+          body: next.hasSession
+            ? `余额 ${formatUsd(next.remainingUsd)}，签到：${next.checkinSupport === 'yes' ? (next.checkinMode === 'dom' ? '网页按钮一键签到' : '接口一键签到') : next.checkinSupport === 'no' ? '该站不支持自动签到' : '无法确认'}`
+            : '请点「打开并登录」在页面里登录一次，再回来同步。',
+        });
         return;
       }
       const next = await app.syncRelay(r);
@@ -133,7 +149,20 @@ export function RelayScreen() {
       setToast({ tone: 'danger', title: '信息不完整', body: 'API Key 与调用地址都必须填写' });
       return;
     }
-    const item = await app.addKey({ label: pkLabel.trim() || '手动导入', key: pkKey.trim(), baseUrl: pkBase.trim(), protocol: pkProtocol, source: 'manual' });
+    const base = pkBase.trim();
+    // 把 Key 绑定到对应站点档案：同域已存在就复用，不存在就新建。
+    // 否则手动粘贴的 Key 会变成「孤儿」，站点不会出现在每日签到列表。
+    let relay = app.relays.find((r) => siteKeyOf(r.baseUrl) === siteKeyOf(base)) ?? null;
+    if (!relay) relay = await app.addRelayByUrl(pkLabel.trim() || siteKeyOf(base), base);
+    const item = await app.addKey({
+      label: pkLabel.trim() || '手动导入',
+      key: pkKey.trim(),
+      baseUrl: base,
+      protocol: pkProtocol,
+      relayId: relay.id,
+      provider: relay.name,
+      source: 'manual',
+    });
     setPasteOpen(false);
     setPkKey('');
     setPkBase('');
@@ -141,8 +170,20 @@ export function RelayScreen() {
     setToast({
       tone: item && item.statusNote ? 'warn' : 'ok',
       title: item ? '已保存到本机' : '保存失败',
-      body: item ? `密钥 ${item.maskedKey} 已写入本机加密区，数据库里只留掩码。${item.statusNote || ''}` : '未知错误',
+      body: item ? `密钥 ${item.maskedKey} 已写入本机加密区，数据库里只留掩码；站点已加入每日签到，正在后台识别登录态。${item.statusNote || ''}` : '未知错误',
     });
+    if (item && relay) {
+      // 不阻塞界面：后台读取登录态、余额与签到方式
+      app.probeRelay({ ...relay, apiBase: relay.apiBase || base }).then((next) => {
+        setToast({
+          tone: next.hasSession ? 'ok' : 'warn',
+          title: next.hasSession ? `${next.name} 已加入每日签到` : `${next.name} 已保存`,
+          body: next.hasSession
+            ? `已读到账号 ${next.username ?? ''}，余额 ${formatUsd(next.remainingUsd)}；${next.checkinSupport === 'yes' ? '可一键签到' : next.checkinSupport === 'no' ? '该站不支持自动签到' : '签到方式无法确认'}。`
+            : '后台暂时读不到登录态：点「打开并登录」登录一次后会自动恢复一键签到。',
+        });
+      }).catch(() => {});
+    }
   };
 
   return (
@@ -262,7 +303,7 @@ export function RelayScreen() {
                     <KeyValue k="站点链接" v={r.baseUrl} mono />
                     <KeyValue k="剩余 token" v={r.remainingTokens != null ? `${Math.round(r.remainingTokens).toLocaleString('en-US')} tokens（约 ${formatUsd(r.remainingUsd)}）` : '未同步，点下方「同步余额」'} />
                     <KeyValue k="账户余额" v={r.quota != null ? `${formatUsd(quotaToUsd(r.quota))}（已用 ${formatUsd(quotaToUsd(r.usedQuota))}）` : '未知'} />
-                    <KeyValue k="站点用户" v={r.username ? `${r.username}（ID ${r.userId ?? '—'}）` : '未登录'} />
+                    <KeyValue k="站点用户" v={r.username ? `${r.username}（ID ${r.userId ?? '—'}）` : r.hasSession ? '已登录（网页会话已保存）' : '未登录（点下方「打开并登录」）'} />
                     <KeyValue k="签到能力" v={r.checkinSupport === 'yes' ? '支持自动签到' : r.checkinSupport === 'no' ? `不支持：${r.checkinSupportNote || '站点未开启'}` : `无法确认：${r.checkinSupportNote || '尚未探测'}`} />
                     <KeyValue k="自动建档" v={r.autoKeySupport === 'yes' ? '已成功自动建档' : r.autoKeySupport === 'no' ? `不支持：${r.autoKeyNote || ''}` : `无法确认${r.autoKeyNote ? `：${r.autoKeyNote}` : ''}`} />
                     <KeyValue k="最近同步" v={dateTime(r.lastSyncAt)} />

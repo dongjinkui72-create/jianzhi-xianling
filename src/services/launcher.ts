@@ -3,6 +3,7 @@ import { toBase64 } from '../lib/base64';
 import { normalizeUrl } from '../lib/normalize';
 import type { ApiKeyItem, ApiProtocol, ChatClient } from '../lib/types';
 import { storeUrl } from './detectApps';
+import { launchAppByName, launchAppPackage } from '../native/installedApps';
 
 /**
  * 核心功能②：点一下启动按钮 → 拉起 AI 聊天软件 → 全自动写入 API Key 与调用地址，
@@ -141,14 +142,53 @@ export async function launchWithImport(client: ChatClient, key: ApiKeyItem, secr
 
 /** 仅拉起（不导入） */
 export async function launchOnly(client: ChatClient): Promise<LaunchResult> {
-  const url = buildLaunchUrl(client) || storeUrl(client);
-  if (!url) {
-    return { ok: false, mode: 'failed', title: '无法拉起', message: `${client.name} 没有登记可用的打开方式`, clientName: client.name };
+  // 1) 官方 URL Scheme
+  const schemeUrl = buildLaunchUrl(client);
+  if (schemeUrl) {
+    const r = await tryOpen(schemeUrl);
+    if (r.ok) {
+      return { ok: true, mode: 'launch_only', title: `已拉起 ${client.name}`, message: '已打开 App，未写入配置。', url: schemeUrl, clientName: client.name };
+    }
   }
-  const r = await tryOpen(url);
-  return r.ok
-    ? { ok: true, mode: 'launch_only', title: `已拉起 ${client.name}`, message: '仅打开 App，未写入配置。', url, clientName: client.name }
-    : { ok: false, mode: 'failed', title: '拉起失败', message: r.error || '未知原因', url, clientName: client.name };
+  // 2) 已登记的 Android 包名直接启动
+  if (client.androidPackage && (await launchAppPackage(client.androidPackage))) {
+    return { ok: true, mode: 'launch_only', title: `已拉起 ${client.name}`, message: '已通过应用包名打开，未写入配置。', clientName: client.name };
+  }
+  // 3) 按应用名称在本机已安装列表里查找并启动（包名未登记也能拉起）
+  const foundPkg = await launchAppByName(client.name);
+  if (foundPkg) {
+    return { ok: true, mode: 'launch_only', title: `已拉起 ${client.name}`, message: `已在本机找到并打开（${foundPkg}），未写入配置。`, clientName: client.name };
+  }
+  // 4) 网页版 / PWA：直接用浏览器打开
+  if (client.browserBased) {
+    const web = client.settingsBase || 'https://chat.lobehub.com';
+    const r = await tryOpen(web);
+    if (r.ok) {
+      return { ok: true, mode: 'launch_only', title: `已打开 ${client.name}`, message: `已用浏览器打开 ${web}。`, url: web, clientName: client.name };
+    }
+  }
+  // 5) 确实没安装：打开应用商店，避免用户点完启动后原地卡住
+  const store = storeUrl(client);
+  if (store) {
+    const r = await tryOpen(store);
+    if (r.ok) {
+      return {
+        ok: false,
+        mode: 'failed',
+        title: `没有在手机上找到 ${client.name}`,
+        message: '已打开应用商店，请先安装；安装完成后回到 App 再点一次「再拉起一次」。',
+        url: store,
+        clientName: client.name,
+      };
+    }
+  }
+  return {
+    ok: false,
+    mode: 'failed',
+    title: `没有在手机上找到 ${client.name}`,
+    message: `请在设置里重新选择该软件，或先安装它。安装后回到这里再点一次启动。`,
+    clientName: client.name,
+  };
 }
 
 /** 去应用商店 */

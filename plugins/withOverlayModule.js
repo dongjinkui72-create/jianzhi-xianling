@@ -80,10 +80,31 @@ const MODULE_KT = [
   '',
   '    private fun toast(msg: String) { Toast.makeText(ctx.applicationContext, msg, Toast.LENGTH_SHORT).show() }',
   '',
-  '    private fun copy(label: String, value: String) {',
-  '        val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager',
-  '        cm.setPrimaryClip(ClipData.newPlainText(label, value))',
-  '        toast(label + " 已复制")',
+  '    private fun copy(btn: TextView, label: String, value: String) {',
+  '        var ok = false',
+  '        try {',
+  '            val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager',
+  '            cm.setPrimaryClip(ClipData.newPlainText(label, value))',
+  '            val clip = cm.primaryClip',
+  '            ok = clip != null && clip.itemCount > 0 && clip.getItemAt(0).coerceToText(ctx).toString() == value',
+  '        } catch (e: Exception) {',
+  '            ok = false',
+  '        }',
+  '        btn.text = "已复制"',
+  '        btn.postDelayed({ runCatching { btn.text = "复制" } }, 1800)',
+  '        if (ok) {',
+  '            toast(label + " 已复制")',
+  '        } else {',
+  '            // Android 10+ 后台应用直写剪贴板可能被系统拦截：用透明前台页写入一次',
+  '            try {',
+  '                val i = android.content.Intent(ctx, JZCopyActivity::class.java)',
+  '                i.putExtra("value", value)',
+  '                i.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)',
+  '                ctx.startActivity(i)',
+  '            } catch (e: Exception) {',
+  '                toast("复制失败：请长按文字手动选择复制")',
+  '            }',
+  '        }',
   '    }',
   '',
   '    private fun buildUi(title: String) {',
@@ -135,7 +156,7 @@ const MODULE_KT = [
   '        hint.textSize = 10f',
   '        box.addView(hint)',
   '',
-  '        val lp = params(dp(260), WindowManager.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.END)',
+  '        val lp = params(dp(300), WindowManager.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.END)',
   '        lp.x = dp(14); lp.y = dp(176)',
   '        w.addView(box, lp)',
   '        panel = box',
@@ -156,7 +177,8 @@ const MODULE_KT = [
   '        v.text = value',
   '        v.setTextColor(0xFF0D1B2A.toInt())',
   '        v.textSize = 11f',
-  '        v.setMaxLines(3)',
+  '        v.setMaxLines(4)',
+  '        v.setTextIsSelectable(true)',
   '        val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)',
   '        r.addView(v, lp)',
   '        val c = TextView(ctx.applicationContext)',
@@ -164,9 +186,25 @@ const MODULE_KT = [
   '        c.setTextColor(0xFF2E7BFF.toInt())',
   '        c.textSize = 12f',
   '        c.setPadding(dp(10), dp(4), dp(4), dp(4))',
-  '        c.setOnClickListener { copy(label, value) }',
+  '        c.setOnClickListener { copy(c, label, value) }',
   '        r.addView(c)',
   '        return r',
+  '    }',
+  '}',
+  '',
+  '/** 透明前台页：后台悬浮窗写剪贴板被系统拦截时，用它在前台完成复制 */',
+  'class JZCopyActivity : android.app.Activity() {',
+  '    override fun onCreate(savedInstanceState: android.os.Bundle?) {',
+  '        super.onCreate(savedInstanceState)',
+  '        try {',
+  '            val value = intent?.getStringExtra("value") ?: ""',
+  '            val cm = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager',
+  '            cm.setPrimaryClip(ClipData.newPlainText("剪纸仙灵", value))',
+  '            Toast.makeText(this, "已复制，返回后直接粘贴", Toast.LENGTH_SHORT).show()',
+  '        } catch (e: Exception) {',
+  '            Toast.makeText(this, "复制失败，请在悬浮窗里长按文字选择复制", Toast.LENGTH_SHORT).show()',
+  '        }',
+  '        finish()',
   '    }',
   '}',
 ].join('\n');
@@ -201,6 +239,24 @@ const withOverlayModule = (config) => {
     const perms = manifest['uses-permission'] || (manifest['uses-permission'] = []);
     const name = 'android.permission.SYSTEM_ALERT_WINDOW';
     if (!perms.some((p) => p?.$?.['android:name'] === name)) perms.push({ $: { 'android:name': name } });
+
+    // 透明复制页（Android 10+ 后台剪贴板限制的兜底）
+    const app = manifest.application?.[0];
+    if (app) {
+      app.activity = app.activity || [];
+      if (!app.activity.some((a) => a?.$?.['android:name'] === '.JZCopyActivity')) {
+        app.activity.push({
+          $: {
+            'android:name': '.JZCopyActivity',
+            'android:theme': '@android:style/Theme.Translucent.NoTitleBar',
+            'android:exported': 'false',
+            'android:excludeFromRecents': 'true',
+            'android:noHistory': 'true',
+            'android:taskAffinity': '',
+          },
+        });
+      }
+    }
     return cfg;
   });
   config = withDangerousMod(config, ['android', (cfg) => {

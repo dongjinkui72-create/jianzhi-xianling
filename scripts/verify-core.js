@@ -272,8 +272,13 @@ t('无探针记录时至少回退到页面域及其变体', () => {
 t('后台签到模块可加载且导出齐全', () => {
   const H = require(path.join(base, 'services', 'headlessCheckin.js'));
   assert.strictEqual(typeof H.headlessCheckin, 'function');
+  assert.strictEqual(typeof H.headlessProbeSite, 'function');
   assert.strictEqual(typeof H.registerHeadlessNavigator, 'function');
   assert.strictEqual(H.headlessReady(), false);
+});
+t('带 /apiroot 前缀的公益站根地址能被正确还原', () => {
+  const cands = R.deriveApiCandidates(['https://ly.7625.xyz/apiroot/api/user/self'], 'https://ly.7625.xyz/docs');
+  assert.strictEqual(cands[0], 'https://ly.7625.xyz/apiroot');
 });
 console.log('\n────────────────────────────');
 console.log(`通过 ${pass} 项，失败 ${fail} 项`);

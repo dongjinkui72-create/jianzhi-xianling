@@ -273,37 +273,85 @@ export interface CheckinSupport {
   reason: string | null;
   minQuota: number | null;
   maxQuota: number | null;
+  /** 实际命中的签到接口路径（不同面板可能不同） */
+  path?: string;
 }
+
+/** 不同 New API 衍生面板的签到路径 */
+const CHECKIN_PATHS = ['/api/user/checkin', '/api/user/check_in', '/api/checkin', '/api/user/sign_in'];
 
 /**
  * 探测签到能力。红线：不确定就返回 unknown，绝不谎报「支持」。
  */
 export async function fetchCheckinSupport(t: Transport): Promise<CheckinSupport> {
-  const res = await t.request('/api/user/checkin');
-  const env = envelope(res);
-
-  if (res.status === 404) {
-    return { support: 'no', reason: '该站点没有签到接口（HTTP 404）', minQuota: null, maxQuota: null };
-  }
-  if (!env.success) {
-    const msg = env.message || describeFailure(res, env);
-    if (/not enabled|未开启|未启用|not\s*open/i.test(msg)) {
-      return { support: 'no', reason: `该站点未开启签到功能：${msg}`, minQuota: null, maxQuota: null };
-    }
+  let sawNetworkError: string | null = null;
+  for (const path of CHECKIN_PATHS) {
+    const res = await t.request(path);
+    const env = envelope(res);
+    if (res.status === 404) continue;
     if (res.status === 0) {
-      return { support: 'unknown', reason: `网络不可达，无法确认：${msg}`, minQuota: null, maxQuota: null };
+      sawNetworkError = res.error || '网络不可达';
+      continue;
     }
-    return { support: 'unknown', reason: `无法确认签到能力：${msg}`, minQuota: null, maxQuota: null };
+    if (!env.success) {
+      const msg = env.message || describeFailure(res, env);
+      if (/not enabled|未开启|未启用|not\s*open/i.test(msg)) {
+        return { support: 'no', reason: `该站点未开启签到功能：${msg}`, minQuota: null, maxQuota: null, path };
+      }
+      return { support: 'unknown', reason: `无法确认签到能力：${msg}`, minQuota: null, maxQuota: null, path };
+    }
+    const d = env.data || {};
+    const enabled = d.enabled === true || d.enabled === undefined;
+    return {
+      support: enabled ? 'yes' : 'no',
+      reason: enabled ? null : '站点已关闭签到',
+      minQuota: num(d.min_quota),
+      maxQuota: num(d.max_quota),
+      path,
+    };
   }
+  if (sawNetworkError) return { support: 'unknown', reason: `网络不可达，无法确认：${sawNetworkError}`, minQuota: null, maxQuota: null };
+  return { support: 'no', reason: '该站点没有签到接口（HTTP 404），可能在网页按钮上', minQuota: null, maxQuota: null };
+}
 
-  const d = env.data || {};
-  const enabled = d.enabled === true || d.enabled === undefined;
-  return {
-    support: enabled ? 'yes' : 'no',
-    reason: enabled ? null : '站点已关闭签到',
-    minQuota: num(d.min_quota),
-    maxQuota: num(d.max_quota),
-  };
+/** 页面上是否存在「签到 / 已签到」按钮（只探测，不点击） */
+export async function domHasCheckinButton(t: Transport): Promise<{ found: boolean; done: boolean; message: string }> {
+  if (!t.eval) return { found: false, done: false, message: '当前传输不支持页面操作' };
+  const res = await t.eval(
+    `(function(){
+      var text = (document.body && document.body.innerText) || '';
+      var done = /已签到|今日已签|签到成功/.test(text);
+      var nodes = document.querySelectorAll('button, a, div, span, [role="button"]');
+      for (var i = 0; i < nodes.length; i++) {
+        var el = nodes[i];
+        var txt = (el.textContent || '').trim();
+        if (!txt || txt.length > 8) continue;
+        if (!/签到/.test(txt)) continue;
+        var r = el.getBoundingClientRect();
+        if (r.width > 4 && r.height > 4) return { found: true, done: done, message: txt };
+      }
+      return { found: done, done: done, message: done ? '页面显示已签到' : '' };
+    })()`,
+    12000,
+  );
+  if (!res || typeof res !== 'object') return { found: false, done: false, message: '页面签到按钮探测无响应' };
+  return { found: !!res.found, done: !!res.done, message: doneText(res) };
+}
+
+function doneText(res: any): string {
+  if (res.done) return '页面显示已签到，可直接一键签到';
+  if (res.found) return '检测到网页签到按钮，一键签到会在后台自动点击';
+  return '页面上没找到签到按钮';
+}
+
+/** 从页面 localStorage 读 New API 用户 ID（部分部署的接口要求 New-Api-User 头） */
+export async function readLocalUserId(t: Transport): Promise<string | null> {
+  if (!t.eval) return null;
+  const v = await t.eval(
+    `(function(){try{var u=JSON.parse(localStorage.getItem('user')||'null');if(u&&u.id!=null)return String(u.id);}catch(e){}try{var d=JSON.parse(localStorage.getItem('user_info')||'null');if(d&&d.id!=null)return String(d.id);}catch(e){}return null;})()`,
+    8000,
+  );
+  return typeof v === 'string' && /^\d+$/.test(v) ? v : null;
 }
 
 export type CheckinOutcome = 'success' | 'failed' | 'manual_only' | 'unconfirmed';
@@ -323,7 +371,7 @@ export async function doCheckin(t: Transport): Promise<CheckinResult> {
     return { outcome: 'manual_only', message: support.reason || '该站点不支持自动签到，只能到站点页面手动签到', gainedUsd: null };
   }
 
-  const res = await t.request('/api/user/checkin', { method: 'POST' });
+  const res = await t.request(support.path || '/api/user/checkin', { method: 'POST' });
   const env = envelope(res);
 
   if (env.success) {

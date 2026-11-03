@@ -85,6 +85,7 @@ export function storeUrl(c: ChatClient): string | null {
 export const CLIENT_LABEL_HINTS = [
   'tavern',
   'risu',
+  'silly',
   'chatbox',
   'lobe',
   'cherry studio',
@@ -92,9 +93,19 @@ export const CLIENT_LABEL_HINTS = [
   'nextchat',
   'deepchat',
   'chatterui',
+  'chatter',
   'opencat',
   'boltai',
   'chatwise',
+  'janitor',
+  'chub',
+  'roleplay',
+  'character',
+  '酒馆',
+  '角色',
+  '恋爱',
+  'ai聊天',
+  'ai chat',
 ];
 
 export interface ReconcileResult {
@@ -125,9 +136,29 @@ export function reconcileWithInstalled(installed: { label: string; packageName: 
 
   const knownPkgs = new Set(clients.map((c) => (c.androidPackage || '').toLowerCase()).filter(Boolean));
   const knownIds = new Set(clients.map((c) => c.id));
+  const strip = (x: string) => x.toLowerCase().replace(/[（(].*?[）)]/g, '').replace(/[\s_\-.]/g, '');
   for (const a of installed) {
     const key = a.packageName.toLowerCase();
     if (knownPkgs.has(key)) continue;
+    // 登记表里有同名适配器（如 TauriTavern / SillyTavern），把真实包名回填到它身上，
+    // 这样启动时可以直接用包名拉起，而不是再建一条重复项。
+    const nameHit = clients.find(
+      (c) => !c.androidPackage && (strip(a.label).includes(strip(c.name)) || strip(c.name).includes(strip(a.label))),
+    );
+    if (nameHit) {
+      if (nameHit.detected !== 'installed') {
+        updates.push({
+          ...nameHit,
+          androidPackage: a.packageName,
+          detected: 'installed',
+          detectReason: '按应用名称匹配到登记表，并回填了包名',
+        });
+      } else if (nameHit.androidPackage !== a.packageName) {
+        updates.push({ ...nameHit, androidPackage: a.packageName });
+      }
+      knownIds.add(nameHit.id);
+      continue;
+    }
     const hay = `${a.label} ${a.packageName}`.toLowerCase();
     if (!CLIENT_LABEL_HINTS.some((h) => hay.includes(h))) continue;
     const id = 'auto_' + a.packageName.replace(/[^a-z0-9_]/g, '_');

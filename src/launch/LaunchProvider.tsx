@@ -1,10 +1,10 @@
-import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
-import { Platform, Pressable, Text, View } from 'react-native';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { AppState, Platform, Pressable, Text, View } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import { Busy, Chip, GlassButton, Notice, Sheet } from '../components/Bits';
 import { Glass } from '../components/Glass';
-import { apiHostFor, canAutoImport, launchWithImport, type LaunchResult } from '../services/launcher';
+import { apiHostFor, canAutoImport, launchOnly, launchWithImport, type LaunchResult } from '../services/launcher';
 import { canOverlay, requestOverlay, showCredentialOverlay } from '../native/overlay';
 import { navigationRef } from '../navigation/navRef';
 import { useApp } from '../store/AppStore';
@@ -49,24 +49,35 @@ export function LaunchProvider({ children }: { children: React.ReactNode }) {
   const [noAppOpen, setNoAppOpen] = useState(false);
   const [overlayPrompt, setOverlayPrompt] = useState(false);
   const [pendingCred, setPendingCred] = useState<{ title: string; base: string; key: string } | null>(null);
+  const [pendingClient, setPendingClient] = useState<ChatClient | null>(null);
+  const awaitingOverlay = useRef(false);
 
   const selectedKey = useMemo(
     () => app.keys.find((k) => k.id === app.selectedKeyId) ?? null,
     [app.keys, app.selectedKeyId],
   );
 
-  const canLaunch = !!selectedKey && (selectedKey.status === 'ok' || selectedKey.status === 'unknown');
+  /** 用户在设置里配置好的聊天软件（没有配置就禁用启动按钮） */
+  const configuredClient = useMemo(() => {
+    const id = app.settings.preferredClientId;
+    return id ? app.clients.find((c) => c.id === id) ?? null : null;
+  }, [app.clients, app.settings.preferredClientId]);
+
+  const canLaunch =
+    !!configuredClient &&
+    !!selectedKey &&
+    (selectedKey.status === 'ok' || selectedKey.status === 'unknown');
 
   const launchEnabledReason = useMemo(() => {
+    if (!configuredClient) return '还没有配置 AI 聊天软件：先去「设置 → AI 聊天软件」选一个';
     if (!app.keys.length) return '可用池里还没有 API，先去「中转站」登录自动建档';
     if (!selectedKey) return '先在「可用池」里选中一条绿色可用的 API';
     if (!canLaunch) return '选中的 API 在预警区，请改选绿色可用的 API';
     return null;
-  }, [app.keys.length, selectedKey, canLaunch]);
+  }, [configuredClient, app.keys.length, selectedKey, canLaunch]);
 
-  /** 候选：优先能全自动导入的，其次已识别安装的，最后是「无法确认」的 */
+  /** 候选只用于设置页之外的兜底选择界面，启动时不参与：永远打开用户配置好的软件 */
   const candidates = useMemo(() => {
-    // 只把「能把密钥全自动写进去」的软件当作候选；不可导入的官方 App 不参与启动流程
     const usable = app.clients.filter(
       (c) =>
         (c.platform === 'all' || c.platform === Platform.OS) &&
@@ -84,20 +95,93 @@ export function LaunchProvider({ children }: { children: React.ReactNode }) {
       setPickerOpen(false);
       try {
         const secret = await app.getSecretOf(selectedKey);
-        let res = await launchWithImport(client, selectedKey, secret);
-        // 没有自动导入协议的软件：用悬浮窗凭证层兜底（默认收起，点一下才显示，长按关闭）
-        if ((res.mode === 'launch_only' || res.mode === 'unconfirmed') && secret) {
+        if (!secret) {
+          buzz();
+          setResult({
+            ok: false,
+            mode: 'failed',
+            title: '读取密钥失败',
+            message: '本机加密区里没有找到这条 API 的明文密钥，请重新导入一次。',
+            clientName: client.name,
+          });
+          setResultOpen(true);
+          return;
+        }
+
+        const auto = canAutoImport(client);
+        // 不能自动导入的软件必须先有悬浮窗权限，否则无法把地址和密钥送到目标 App 上。
+        // 先在本 App 内提示授权，授权后会自动继续「打开 App 并显示悬浮窗」。
+        if (!auto && !(await canOverlay())) {
+          setPendingCred({ title: `${client.name} · 凭证`, base: apiHostFor(selectedKey), key: secret });
+          setPendingClient(client);
+          setOverlayPrompt(true);
+          return;
+        }
+        let res: LaunchResult;
+
+        if (auto) {
+          // 先走官方自动导入协议
+          res = await launchWithImport(client, selectedKey, secret);
+          if (!res.ok) {
+            // 协议失败也必须先把 App 打开，再改用悬浮窗
+            const lo = await launchOnly(client);
+            res = {
+              ...res,
+              ok: lo.ok,
+              mode: lo.ok ? 'launch_only' : 'failed',
+              title: lo.ok ? `已拉起 ${client.name}` : `${client.name} 未能拉起`,
+              message: lo.ok ? '自动导入协议没有成功，已打开 App；调用地址与密钥改用悬浮窗送达。' : lo.message,
+              url: lo.url,
+            };
+          }
+        } else {
+          // 没有自动导入协议：直接拉起，再用悬浮窗送达
+          const lo = await launchOnly(client);
+          res = {
+            ok: lo.ok,
+            mode: lo.ok ? 'unconfirmed' : 'failed',
+            title: lo.ok ? `已拉起 ${client.name}` : lo.title,
+            message: lo.ok
+              ? `${client.name} 不能自动写入密钥，已打开 App；调用地址与密钥通过悬浮窗送达，点开小圆钮复制即可。`
+              : lo.message,
+            url: lo.url,
+            clientName: client.name,
+          };
+        }
+
+        // 仍然没打开：重新扫描已安装应用后再试一次，绝不原地卡住
+        if (!res.ok) {
+          await app.rescanClients();
+          const lo2 = await launchOnly(client);
+          if (lo2.ok) {
+            res = {
+              ...lo2,
+              mode: auto ? 'launch_only' : 'unconfirmed',
+              title: `已拉起 ${client.name}`,
+              message: auto
+                ? `已打开 ${client.name}，自动导入没有成功，地址与密钥改用悬浮窗送达。`
+                : `${client.name} 不能自动写入密钥，已打开 App；地址与密钥通过悬浮窗送达。`,
+            };
+          }
+        }
+
+        // 需要悬浮窗：自动导入失败，或软件本身没有导入协议
+        const needOverlay = res.ok && !(res.mode === 'auto_import' || res.mode === 'url_import');
+        if (needOverlay) {
+          // 等目标 App 到前台后再盖悬浮窗，避免盖在我们自己界面上
+          await new Promise((r) => setTimeout(r, 800));
           const allowed = await canOverlay();
           if (allowed) {
             const shown = await showCredentialOverlay(`${client.name} · 凭证`, apiHostFor(selectedKey), secret);
             if (shown) {
-              res = { ...res, message: `${res.message} 已开启悬浮窗凭证层：小圆钮点一下显示地址与密钥（可复制），再点收起，长按关闭。` };
+              res = { ...res, message: `${res.message} 悬浮窗已开启：点小圆钮显示地址与密钥（可复制），再点收起，长按关闭。` };
             }
           } else {
             setPendingCred({ title: `${client.name} · 凭证`, base: apiHostFor(selectedKey), key: secret });
             setOverlayPrompt(true);
           }
         }
+
         buzz();
         setResult(res);
         setResultOpen(true);
@@ -109,31 +193,27 @@ export function LaunchProvider({ children }: { children: React.ReactNode }) {
   );
 
   const requestLaunch = useCallback(() => {
-    if (!canLaunch || !selectedKey) {
+    if (!canLaunch || !selectedKey || !configuredClient) {
       buzz();
       return;
     }
-    if (!candidates.length) {
-      setNoAppOpen(true);
-      return;
-    }
-    const preferredId = app.settings.preferredClientId;
-    const preferred = preferredId ? candidates.find((c) => c.id === preferredId) : null;
-    if (preferred && !app.settings.alwaysAskClient) {
-      doLaunch(preferred);
-      return;
-    }
-    if (!app.settings.alwaysAskClient && candidates.length === 1) {
-      doLaunch(candidates[0]);
-      return;
-    }
-    if (candidates.length === 1) {
-      doLaunch(candidates[0]);
-      return;
-    }
-    buzz();
-    setPickerOpen(true);
-  }, [canLaunch, selectedKey, candidates, app.settings, doLaunch]);
+    // 永远打开设置里配置好的那个 App；不再弹选择框、不再走商店兜底
+    doLaunch(configuredClient);
+  }, [canLaunch, selectedKey, configuredClient, doLaunch]);
+
+  // 从系统「悬浮窗权限」页返回时自动继续：打开配置好的 App 并显示凭证
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', async (state) => {
+      if (state !== 'active' || !awaitingOverlay.current) return;
+      awaitingOverlay.current = false;
+      if (await canOverlay()) {
+        if (pendingClient) await doLaunch(pendingClient);
+      } else {
+        setOverlayPrompt(true);
+      }
+    });
+    return () => sub.remove();
+  }, [pendingClient, doLaunch]);
 
   const value = useMemo(() => ({ requestLaunch, launchEnabledReason, canLaunch }), [requestLaunch, launchEnabledReason, canLaunch]);
 
@@ -203,23 +283,19 @@ export function LaunchProvider({ children }: { children: React.ReactNode }) {
         title="这个 App 没有自动导入协议"
         footer={
           <GlassButton
-            label="开启悬浮窗权限并显示凭证"
+            label="开启悬浮窗权限并打开 App"
             icon="layers-outline"
             size="lg"
             onPress={async () => {
-              const okReq = await requestOverlay();
               setOverlayPrompt(false);
-              if (okReq && pendingCred) {
-                setTimeout(async () => {
-                  if (await canOverlay()) await showCredentialOverlay(pendingCred.title, pendingCred.base, pendingCred.key);
-                }, 1200);
-              }
+              awaitingOverlay.current = true;
+              await requestOverlay();
             }}
           />
         }
       >
         <Notice tone="warn" title="改用悬浮窗凭证层">
-          {" 不接受外部写入配置。授权「显示在其他应用上层」后，本 App 会把调用地址与密钥以悬浮窗盖在它界面上：默认收起，点一下显示并可复制，再点收起，长按关闭。"}
+          {" 不接受外部写入配置。授权「显示在其他应用上层」后，本 App 会自动打开它，并把调用地址与密钥以悬浮窗盖在它界面上：默认收起，点一下显示并可复制，再点收起，长按关闭。"}
         </Notice>
       </Sheet>
 
@@ -241,7 +317,7 @@ export function LaunchProvider({ children }: { children: React.ReactNode }) {
                 <View style={{ height: sc.s(6) }} />
                 <Text style={{ fontSize: sc.fs(13), color: palette.ink, fontWeight: '700' }}>调用地址：{apiHostFor(selectedKey)}</Text>
                 <Text style={{ marginTop: sc.s(4), fontSize: sc.fs(13), color: palette.ink, fontWeight: '700' }}>密钥：{selectedKey.maskedKey}</Text>
-                <Text style={{ marginTop: sc.s(6), fontSize: sc.fs(11), color: palette.inkFaint }}>密钥明文只从本机加密区读出并交给目标 App，未经过剪贴板，也没有上传任何服务器。</Text>
+                <Text style={{ marginTop: sc.s(6), fontSize: sc.fs(11), color: palette.inkFaint }}>密钥明文只从本机加密区读出：能自动导入的直接交给目标 App；不能自动导入的放在悬浮窗里，由你点复制。全程不上传服务器。</Text>
               </Glass>
             ) : null}
             {result.mode === 'launch_only' ? (
@@ -249,11 +325,22 @@ export function LaunchProvider({ children }: { children: React.ReactNode }) {
                 改用 Chatbox 即可：本 App 内置了它官方的「导入第三方提供方配置」deep link，点一下就能把密钥和调用地址直接写进去。
               </Notice>
             ) : null}
-            {result.ok && result.url ? (
-              <View style={{ marginTop: sc.s(12) }}>
-                <GlassButton label="再拉起一次" icon="refresh-outline" onPress={() => { if (selectedKey) doLaunch(app.clients.find((c) => c.name === result.clientName) ?? app.clients[0]); }} />
-              </View>
-            ) : null}
+            <View style={{ marginTop: sc.s(12), flexDirection: 'row', flexWrap: 'wrap', gap: sc.s(8) }}>
+              <GlassButton
+                label="再拉起一次"
+                icon="refresh-outline"
+                disabled={!configuredClient}
+                onPress={() => configuredClient && doLaunch(configuredClient)}
+              />
+              {!result.ok ? (
+                <GlassButton
+                  label="去设置选择软件"
+                  icon="settings-outline"
+                  tone="muted"
+                  onPress={() => { setResultOpen(false); navigationRef.isReady() && navigationRef.navigate('Settings' as never); }}
+                />
+              ) : null}
+            </View>
           </>
         ) : null}
       </Sheet>

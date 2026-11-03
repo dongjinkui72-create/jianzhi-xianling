@@ -6,7 +6,6 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { currentThemeName, palette, radius } from '../theme/tokens';
 import { useScale } from '../theme/useScale';
-import { useApp } from '../store/AppStore';
 import { useLaunch } from '../launch/LaunchProvider';
 
 /**
@@ -26,10 +25,8 @@ const LABELS: Record<string, string> = { Radar: '雷达站', Relay: '中转站',
 /** 小型悬浮启动按钮：浮在界面右下角、底部导航之上 */
 export function FloatingLaunchButton() {
   const sc = useScale();
-  const { keys, selectedKeyId } = useApp();
-  const { requestLaunch, launchEnabledReason } = useLaunch();
-  const selected = keys.find((k) => k.id === selectedKeyId) ?? null;
-  const enabled = !!selected && (selected.status === 'ok' || selected.status === 'unknown');
+  const { requestLaunch, launchEnabledReason, canLaunch } = useLaunch();
+  const enabled = canLaunch;
   const size = sc.s(54);
 
   return (

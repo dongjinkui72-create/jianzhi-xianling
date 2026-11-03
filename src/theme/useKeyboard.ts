@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Keyboard, Platform } from 'react-native';
+import { Keyboard, LayoutAnimation, Platform } from 'react-native';
 
 /**
  * 键盘高度钩子。
@@ -11,8 +11,14 @@ export function useKeyboardHeight(): number {
   useEffect(() => {
     const show = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
     const hide = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-    const s = Keyboard.addListener(show, (e: any) => setH(e?.endCoordinates?.height ?? 0));
-    const d = Keyboard.addListener(hide, () => setH(0));
+    const s = Keyboard.addListener(show, (e: any) => {
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      setH(e?.endCoordinates?.height ?? 0);
+    });
+    const d = Keyboard.addListener(hide, () => {
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      setH(0);
+    });
     return () => {
       s.remove();
       d.remove();

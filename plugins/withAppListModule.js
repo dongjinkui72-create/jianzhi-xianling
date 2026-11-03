@@ -48,6 +48,67 @@ class JZAppListModule(private val ctx: ReactApplicationContext) : ReactContextBa
             promise.reject("E_APP_LIST", e.message)
         }
     }
+
+    private fun norm(s: String): String {
+        val sb = StringBuilder()
+        for (ch in s.lowercase()) {
+            if (ch.isLetterOrDigit()) sb.append(ch)
+        }
+        return sb.toString()
+    }
+
+    /** 按应用名称在本机应用列表里找到并拉起（包名未知时的兜底） */
+    @ReactMethod
+    fun launchAppByName(name: String, promise: Promise) {
+        try {
+            val pm = ctx.packageManager
+            val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+            val infos = pm.queryIntentActivities(intent, 0)
+            val target = norm(name)
+            var best: String? = null
+            for (ri in infos) {
+                val pkg = ri.activityInfo.packageName
+                if (pkg == ctx.packageName) continue
+                val label = norm(ri.loadLabel(pm).toString())
+                val npkg = norm(pkg)
+                if (label == target || npkg == target || (target.length >= 3 && (label.contains(target) || target.contains(label)))) {
+                    best = pkg
+                    break
+                }
+            }
+            if (best == null) {
+                promise.resolve("")
+                return
+            }
+            val li = pm.getLaunchIntentForPackage(best)
+            if (li == null) {
+                promise.resolve("")
+                return
+            }
+            li.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            ctx.startActivity(li)
+            promise.resolve(best)
+        } catch (e: Exception) {
+            promise.resolve("")
+        }
+    }
+
+    /** 用包名直接拉起目标 App（比 URL Scheme 更可靠） */
+    @ReactMethod
+    fun launchApp(packageName: String, promise: Promise) {
+        try {
+            val intent = ctx.packageManager.getLaunchIntentForPackage(packageName)
+            if (intent == null) {
+                promise.resolve(false)
+                return
+            }
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            ctx.startActivity(intent)
+            promise.resolve(true)
+        } catch (e: Exception) {
+            promise.resolve(false)
+        }
+    }
 }
 `;
 
