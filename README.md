@@ -1,5 +1,11 @@
 # 剪纸仙灵
 
+> 仓库：https://github.com/dongjinkui72-create/jianzhi-xianling  
+> 安装包（Release）：https://github.com/dongjinkui72-create/jianzhi-xianling/releases/tag/v2.0.0  
+> 适配器清单（App 启动时自动拉取）：https://raw.githubusercontent.com/dongjinkui72-create/jianzhi-xianling/main/adapters/clients.json
+>
+> **本软件永久免费、代码开源。如遇任何人以本软件名义收费，那就是你被骗了。** 觉得好用请到仓库点亮 Star。
+
 一个**免费开源**的手机 App（Expo / React Native），专门帮你把各家 AI 厂商和中转站的免费 API 额度薅干净。
 
 免注册、免登录、打开即用，没有任何账号体系。**交付形态只有手机 App**，不提供网页 / H5 / 小程序版本。
