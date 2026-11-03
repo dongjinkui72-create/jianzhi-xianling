@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Linking, ScrollView, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Chip, Collapsible, EmptyState, Field, GlassButton, IconButton, KeyValue, Notice, Sheet } from '../components/Bits';
@@ -75,6 +75,19 @@ export function RelayScreen() {
     },
     [app.logs, today],
   );
+
+  // 升级后旧数据里的「不支持签到」可能是误判：进入页面时后台重探一次，拿到真实结果
+  const probedOnce = useRef(false);
+  useEffect(() => {
+    if (probedOnce.current) return;
+    probedOnce.current = true;
+    const targets = saved.filter((r) => r.checkinSupport !== 'yes').slice(0, 2);
+    (async () => {
+      for (const r of targets) {
+        await app.probeRelay(r).catch(() => {});
+      }
+    })();
+  }, [saved, app]);
 
   const openRelay = (r: Relay, autoCheckin = false) =>
     navigationRef.isReady() && navigationRef.navigate('RelayWeb', { relayId: r.id, url: r.baseUrl, name: r.name, autoCheckin });
@@ -292,7 +305,10 @@ export function RelayScreen() {
                     <Text numberOfLines={1} style={{ fontSize: sc.fs(14.5), fontWeight: '800', color: palette.ink }}>{r.name}</Text>
                     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sc.s(5), marginTop: sc.s(4) }}>
                       <Chip label={r.remainingTokens != null ? `剩余 ${compactNumber(r.remainingTokens)} tokens` : r.remainingUsd != null ? `剩余 ${formatUsd(r.remainingUsd)}` : '剩余 token 未知'} tone={r.remainingUsd != null && r.remainingUsd < app.settings.lowUsdThreshold ? 'danger' : 'ok'} icon="pie-chart-outline" />
-                      <Chip label={r.accessTokenRef ? '已存长期凭据' : '需网页登录'} tone={r.accessTokenRef ? 'ok' : 'muted'} />
+                      <Chip
+                        label={r.accessTokenRef ? '已存长期凭据' : r.hasSession ? '已登录（网页会话）' : '需网页登录'}
+                        tone={r.accessTokenRef || r.hasSession ? 'ok' : 'muted'}
+                      />
                     </View>
                   </View>
                   <PressableOpacity label={open ? '收起' : '展开'} icon={open ? 'chevron-up' : 'chevron-down'} onPress={() => setOpenRows((m) => ({ ...m, [r.id]: !open }))} />

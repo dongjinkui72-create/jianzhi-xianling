@@ -400,7 +400,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const remainingUsd = p.self ? quotaToUsd(p.self.quota) : r.remainingUsd;
     const next: Relay = {
       ...r,
-      hasSession: p.session || r.hasSession,
+      baseUrl: p.pageUrl ?? r.baseUrl,
+      hasSession: p.session || /已签到/.test(p.note || '') || r.hasSession,
       apiBase: p.apiBase ?? r.apiBase,
       userId: p.self?.id ?? r.userId,
       username: p.self?.username ?? r.username,
@@ -408,8 +409,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       usedQuota: p.self?.usedQuota ?? r.usedQuota,
       remainingUsd,
       remainingTokens: p.self ? usdToTokensEstimate(remainingUsd) : r.remainingTokens,
-      checkinSupport: p.session ? p.checkinSupport : r.checkinSupport,
-      checkinMode: p.session ? p.checkinMode : r.checkinMode,
+      checkinSupport: p.checkinMode ? 'yes' : p.session ? p.checkinSupport : r.checkinSupport,
+      checkinMode: p.checkinMode ?? r.checkinMode,
       checkinSupportNote: p.session ? p.note : p.note || r.checkinSupportNote,
       lastSyncAt: Date.now(),
     };
@@ -573,8 +574,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
 
       const p = hb?.probe;
-      const basePatch: Partial<Relay> = p?.session
-        ? {
+      const basePatch: Partial<Relay> = {
+        baseUrl: p?.pageUrl ?? r.baseUrl,
+        ...(p?.session
+          ? {
             hasSession: true,
             apiBase: p.apiBase ?? r.apiBase,
             userId: p.self?.id ?? r.userId,
@@ -587,12 +590,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             checkinMode: hb?.mode ?? p.checkinMode,
             checkinSupportNote: p.note,
           }
-        : {};
+          : {}),
+      };
 
       if (outcome === 'success') {
         await DB.upsertRelay({
           ...r,
           ...basePatch,
+          hasSession: true,
           checkinSupport: 'yes',
           checkinMode: hb?.mode ?? r.checkinMode,
           checkinSupportNote: null,

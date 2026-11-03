@@ -1,6 +1,6 @@
 {
   "name": "jianzhi-xianling",
-  "version": "2.0.7",
+  "version": "2.0.8",
   "main": "index.ts",
   "dependencies": {
     "@expo/vector-icons": "^15.0.2",

@@ -68,6 +68,8 @@ function pageRoot(url: string): string {
 }
 
 export interface HeadlessProbe {
+  /** 实际找到签到入口的页面地址，供下次直接打开 */
+  pageUrl?: string;
   session: boolean;
   apiBase: string | null;
   self: SelfInfo | null;
@@ -129,36 +131,81 @@ async function probeAt(relay: Relay, pageUrl: string): Promise<HeadlessProbe> {
     }
   }
   if (!self) {
-    return { session: false, apiBase: null, self: null, checkinSupport: 'unknown', checkinMode: null, note: '后台读不到登录态（Cookie 可能已失效）' };
+    // 读不到账号接口，但页面可能仍然有「签到 / 已签到」按钮。
+    // 只要能确认页面上的签到入口，就允许后续用网页按钮签到。
+    const dom = await domHasCheckinButton(headlessBridge);
+    if (dom.found) {
+      return { pageUrl, session: false, apiBase: null, self: null, checkinSupport: 'unknown', checkinMode: 'dom', note: dom.message };
+    }
+    return { pageUrl, session: false, apiBase: null, self: null, checkinSupport: 'unknown', checkinMode: null, note: '后台读不到登录态（Cookie 可能已失效）' };
   }
 
   const support = await fetchCheckinSupport(headlessBridge);
   if (support.support === 'yes') {
-    return { session: true, apiBase, self, checkinSupport: 'yes', checkinMode: 'api', note: null };
+    return { pageUrl, session: true, apiBase, self, checkinSupport: 'yes', checkinMode: 'api', note: null };
   }
   const dom = await domHasCheckinButton(headlessBridge);
   if (dom.found) {
-    return { session: true, apiBase, self, checkinSupport: 'yes', checkinMode: 'dom', note: dom.message };
+    return { pageUrl, session: true, apiBase, self, checkinSupport: 'yes', checkinMode: 'dom', note: dom.message };
   }
+  const explicitNo = support.support === 'no' && /未开启|未启用|已关闭|not enabled/i.test(support.reason || '');
   return {
+    pageUrl,
     session: true,
     apiBase,
     self,
-    checkinSupport: support.support === 'no' ? 'no' : 'unknown',
+    // 只是接口 404、页面按钮又没抓到时，不能断言「不支持」，只能说「无法确认」
+    checkinSupport: explicitNo ? 'no' : 'unknown',
     checkinMode: null,
     note: support.reason || dom.message || null,
   };
 }
 
 async function probeLocked(relay: Relay): Promise<HeadlessProbe> {
-  const root = pageRoot(relay.baseUrl) + '/';
-  let out = await probeAt(relay, root);
-  // 有些站点的控制台是独立路由：站点根读不到登录态时，再用用户保存的完整地址试一次
-  if (!out.session && relay.baseUrl && relay.baseUrl.replace(/\/+$/, '') !== root.replace(/\/+$/, '')) {
-    const second = await probeAt(relay, relay.baseUrl);
-    if (second.session) out = second;
+  const root = pageRoot(relay.baseUrl);
+  // 先打开用户保存的完整页面（很多站的「签到」按钮只在控制台路由上），
+  // 再依次尝试站点根和常见控制台路由。以「能找到签到按钮」的页面为准。
+  const urls: string[] = [];
+  const push = (u: string) => {
+    const v = (u || '').replace(/\/+$/, '');
+    if (v && urls.indexOf(v) === -1) urls.push(v);
+  };
+  push(relay.baseUrl);
+  push(root + '/');
+  push(root + '/console');
+
+  let best: HeadlessProbe | null = null;
+  let bestScore = -1;
+  let bestUrl = '';
+  let lastUrl = '';
+  for (const u of urls) {
+    const p = await probeAt(relay, u);
+    lastUrl = u;
+    const score = p.session && p.checkinMode ? 3 : p.checkinMode ? 2 : p.session ? 1 : 0;
+    if (score > bestScore) {
+      best = p;
+      bestScore = score;
+      bestUrl = u;
+    }
+    // 已经读到登录态，并且这个页面确实有签到入口：直接采用
+    if (score === 3) return p;
   }
-  return out;
+  // 最后停在的页面可能不是读到登录态的那一页；切回最佳页面再确认，
+  // 否则后面的签到会点在错误的页面上。
+  if (best && (best.session || best.checkinMode) && bestUrl && bestUrl !== lastUrl) {
+    const again = await probeAt(relay, bestUrl);
+    if (again.session || again.checkinMode) return again;
+  }
+  return (
+    best || {
+      session: false,
+      apiBase: null,
+      self: null,
+      checkinSupport: 'unknown',
+      checkinMode: null,
+      note: '后台读不到登录态（Cookie 可能已失效）',
+    }
+  );
 }
 
 export async function headlessProbeSite(relay: Relay): Promise<HeadlessProbe> {
@@ -198,7 +245,7 @@ export async function headlessCheckin(relay: Relay): Promise<HeadlessCheckinResu
   busy = true;
   try {
     const probe = await probeLocked(relay);
-    if (!probe.session) {
+    if (!probe.session && !probe.checkinMode) {
       return {
         ok: false,
         outcome: 'unconfirmed',
@@ -228,10 +275,15 @@ export async function headlessCheckin(relay: Relay): Promise<HeadlessCheckinResu
         probe,
       };
     }
+    // 最后一搏：有些 SPA 的签到按钮是延迟渲染的，直接再找一次并点击
+    const late = await domCheckin(headlessBridge);
+    if (late.ok) {
+      return { ok: true, outcome: 'success', message: late.message, mode: 'dom', probe };
+    }
     return {
       ok: false,
       outcome: probe.checkinSupport === 'no' ? 'manual_only' : 'unconfirmed',
-      message: probe.note || '该站点没有检测到可用的签到入口',
+      message: late.message || probe.note || '该站点没有检测到可用的签到入口',
       mode: null,
       probe,
     };

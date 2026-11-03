@@ -112,7 +112,8 @@ export function RelayWebScreen({ route, navigation }: any) {
         await app.updateRelay(next);
         return { mode: 'dom' as const, note: dom.message };
       }
-      const next = { ...relay, checkinSupport: support.support, checkinMode: null, checkinSupportNote: dom.message || support.reason };
+      const explicitNo = support.support === 'no' && /未开启|未启用|已关闭|not enabled/i.test(support.reason || '');
+      const next = { ...relay, checkinSupport: explicitNo ? ('no' as const) : ('unknown' as const), checkinMode: null, checkinSupportNote: dom.message || support.reason };
       await app.updateRelay(next);
       return { mode: null, note: dom.message || support.reason };
     },
@@ -143,8 +144,15 @@ export function RelayWebScreen({ route, navigation }: any) {
           return;
         }
         const fam = await detectRelayFamily(bridge);
+        // 记住用户当前真正停留的控制台页面（签到按钮可能只在这个路由上）
+        const here = await bridge.eval('location.href');
+        const hereUrl =
+          typeof here === 'string' && /^https?:/i.test(here) && siteKeyOf(here) === siteKeyOf(relay0.baseUrl)
+            ? normalizeUrl(here)
+            : relay0.baseUrl;
         const relay: Relay = {
           ...relay0,
+          baseUrl: hereUrl,
           apiBase: apiBase ?? relay0.apiBase,
           hasSession: true,
           kind: fam.family === 'unknown' ? relay0.kind : fam.family,
@@ -228,6 +236,10 @@ export function RelayWebScreen({ route, navigation }: any) {
     let checkedIn = '';
     if (bridge.ready) {
       try {
+        const here = await bridge.eval('location.href');
+        if (typeof here === 'string' && /^https?:/i.test(here) && siteKeyOf(here) === siteKeyOf(next.baseUrl)) {
+          next = { ...next, baseUrl: normalizeUrl(here) };
+        }
         const d = await discover();
         if (d.self) {
           const usd = quotaToUsd(d.self.quota);
@@ -253,8 +265,9 @@ export function RelayWebScreen({ route, navigation }: any) {
               next = { ...next, checkinSupport: 'yes', checkinMode: 'dom', checkinSupportNote: dom.message };
               checkedIn = '支持网页按钮一键签到，已加入每日签到';
             } else {
-              next = { ...next, checkinSupport: support.support, checkinMode: null, checkinSupportNote: support.reason || dom.message };
-              checkedIn = support.support === 'no' ? '该站没有自动签到入口' : '签到方式无法确认';
+              const explicitNo = support.support === 'no' && /未开启|未启用|已关闭|not enabled/i.test(support.reason || '');
+              next = { ...next, checkinSupport: explicitNo ? 'no' : 'unknown', checkinMode: null, checkinSupportNote: support.reason || dom.message };
+              checkedIn = explicitNo ? '该站已关闭签到' : '签到方式暂无法确认，点「签到」会再自动尝试';
             }
           }
         } else {

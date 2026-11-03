@@ -177,8 +177,21 @@ export interface SelfInfo {
 }
 
 export async function fetchSelf(t: Transport): Promise<{ ok: boolean; self?: SelfInfo; reason?: string }> {
-  const res = await t.request('/api/user/self');
-  const env = envelope(res);
+  // 不同 New API 衍生面板的用户信息路径略有差异，逐个兜底
+  let res = await t.request('/api/user/self', { timeoutMs: 10000 });
+  let env = envelope(res);
+  const hardFail = res.status === 401 || res.status === 403 || res.status === 0;
+  if (!hardFail && (!env.success || !env.data || env.data.id == null)) {
+    for (const path of ['/api/user/info', '/api/user/profile', '/api/user']) {
+      const r2 = await t.request(path, { timeoutMs: 8000 });
+      const e2 = envelope(r2);
+      if (e2.success && e2.data && e2.data.id != null) {
+        res = r2;
+        env = e2;
+        break;
+      }
+    }
+  }
   if (!env.success || !env.data || env.data.id == null) {
     return { ok: false, reason: describeFailure(res, env) };
   }
@@ -237,22 +250,28 @@ export async function domCheckin(t: Transport): Promise<{ ok: boolean; message: 
   const res = await t.eval(
     `(async function(){
       var pick = function(){
-        var nodes = document.querySelectorAll('button, a, div, span, [role="button"]');
+        var nodes = document.querySelectorAll('button, a, div, span, [role="button"], [aria-label], [title]');
         for (var i = 0; i < nodes.length; i++) {
           var el = nodes[i];
-          var txt = (el.textContent || '').trim();
-          if (!txt || txt.length > 8) continue;
+          var txt = ((el.textContent || '') + ' ' + (el.getAttribute('aria-label') || '') + ' ' + (el.getAttribute('title') || '')).trim();
+          if (!txt) continue;
           if (/已签到|签到成功/.test(txt)) continue;
-          if (/签到/.test(txt)) {
-            var r = el.getBoundingClientRect();
-            if (r.width > 4 && r.height > 4) return el;
-          }
+          if (!/签到/.test(txt)) continue;
+          txt = txt.replace(/\s+/g, ' ');
+          if (txt.length > 16) continue;
+          var r = el.getBoundingClientRect();
+          if (r.width > 4 && r.height > 4) return el;
         }
         return null;
       };
       var before = document.body.innerText || '';
-      var el = pick();
-      if (!el) return { clicked: false, done: /已签到/.test(before) };
+      var el = null;
+      var deadline = Date.now() + 3500;
+      while (!el && Date.now() < deadline) {
+        el = pick();
+        if (!el) await new Promise(function(r){ setTimeout(r, 400); });
+      }
+      if (!el) return { clicked: false, done: /已签到/.test(document.body.innerText || before) };
       el.click();
       await new Promise(function(r){ setTimeout(r, 1500); });
       var after = document.body.innerText || '';
@@ -286,7 +305,7 @@ const CHECKIN_PATHS = ['/api/user/checkin', '/api/user/check_in', '/api/checkin'
 export async function fetchCheckinSupport(t: Transport): Promise<CheckinSupport> {
   let sawNetworkError: string | null = null;
   for (const path of CHECKIN_PATHS) {
-    const res = await t.request(path);
+    const res = await t.request(path, { timeoutMs: 6000 });
     const env = envelope(res);
     if (res.status === 404) continue;
     if (res.status === 0) {
@@ -318,21 +337,31 @@ export async function fetchCheckinSupport(t: Transport): Promise<CheckinSupport>
 export async function domHasCheckinButton(t: Transport): Promise<{ found: boolean; done: boolean; message: string }> {
   if (!t.eval) return { found: false, done: false, message: '当前传输不支持页面操作' };
   const res = await t.eval(
-    `(function(){
-      var text = (document.body && document.body.innerText) || '';
-      var done = /已签到|今日已签|签到成功/.test(text);
-      var nodes = document.querySelectorAll('button, a, div, span, [role="button"]');
-      for (var i = 0; i < nodes.length; i++) {
-        var el = nodes[i];
-        var txt = (el.textContent || '').trim();
-        if (!txt || txt.length > 8) continue;
-        if (!/签到/.test(txt)) continue;
-        var r = el.getBoundingClientRect();
-        if (r.width > 4 && r.height > 4) return { found: true, done: done, message: txt };
+    `(async function(){
+      var deadline = Date.now() + 3500;
+      var last = { found: false, done: false, message: '' };
+      while (Date.now() < deadline) {
+        var text = (document.body && document.body.innerText) || '';
+        var done = /已签到|今日已签|签到成功/.test(text);
+        var nodes = document.querySelectorAll('button, a, div, span, [role="button"], [aria-label], [title]');
+        for (var i = 0; i < nodes.length; i++) {
+          var el = nodes[i];
+          var txt = ((el.textContent || '') + ' ' + (el.getAttribute('aria-label') || '') + ' ' + (el.getAttribute('title') || '')).trim();
+          if (!txt) continue;
+          if (!/签到/.test(txt)) continue;
+          txt = txt.replace(/\s+/g, ' ');
+          if (txt.length > 16) continue;
+          var r = el.getBoundingClientRect();
+          if (r.width > 4 && r.height > 4) {
+            return { found: true, done: done, message: txt };
+          }
+        }
+        if (done) return { found: true, done: true, message: '已签到' };
+        await new Promise(function(res){ setTimeout(res, 500); });
       }
-      return { found: done, done: done, message: done ? '页面显示已签到' : '' };
+      return last;
     })()`,
-    12000,
+    10000,
   );
   if (!res || typeof res !== 'object') return { found: false, done: false, message: '页面签到按钮探测无响应' };
   return { found: !!res.found, done: !!res.done, message: doneText(res) };
