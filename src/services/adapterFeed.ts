@@ -30,6 +30,10 @@ import type { ChatClient, DetectStatus, ImportKind } from '../lib/types';
  * }
  */
 
+/** 官方适配器清单：仓库上传后，新软件的导入协议不用发版就能生效 */
+export const OFFICIAL_ADAPTER_FEED =
+  'https://raw.githubusercontent.com/dongjinkui72-create/jianzhi-xianling/main/adapters/clients.json';
+
 const VALID_KINDS: ImportKind[] = ['deeplink_import', 'url_settings_import', 'launch_only', 'unconfirmed'];
 
 export interface AdapterFeedResult {

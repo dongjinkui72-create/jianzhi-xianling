@@ -309,7 +309,7 @@ export function SettingsScreen({ navigation }: any) {
         </Glass>
 
         {/* 数据与隐私 */}
-        <Collapsible title="数据与隐私" subtitle="云端只放公开情报，私有数据一律留在本机" right={<Ionicons name="lock-closed-outline" size={sc.s(17)} color={palette.ok} />}>
+        <Collapsible title="数据与隐私" right={<Ionicons name="lock-closed-outline" size={sc.s(17)} color={palette.ok} />}>
           <View style={{ paddingTop: sc.s(10) }}>
             <KeyValue k="账号体系" v="无。免注册免登录，打开即用" />
             <KeyValue k="云端（公开）" v="providers / benefits / relays / clients 情报与适配器清单，匿名可读" />
@@ -320,7 +320,7 @@ export function SettingsScreen({ navigation }: any) {
           </View>
         </Collapsible>
 
-        <Collapsible title="能力边界（如实标注）" subtitle="哪些做不到，App 会明说" right={<Ionicons name="information-circle-outline" size={sc.s(17)} color={palette.warn} />}>
+        <Collapsible title="能力边界（如实标注）" right={<Ionicons name="information-circle-outline" size={sc.s(17)} color={palette.warn} />}>
           <View style={{ paddingTop: sc.s(10) }}>
             <Notice tone="warn" title="自动签到">只对开启了签到接口、且未强制人机验证的站点有效；其余标「只能手动」，日志记 manual_only，绝不伪造成功。</Notice>
             <View style={{ height: sc.s(8) }} />

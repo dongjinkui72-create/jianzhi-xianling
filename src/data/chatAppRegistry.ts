@@ -233,6 +233,16 @@ export const CHAT_APP_REGISTRY: Seed[] = [
     note: 'Tauri 桌面客户端，无对外导入协议；启动后由悬浮窗凭证层兜底',
   },
   {
+    id: 'risuai',
+    name: 'RisuAI（开源恋爱/角色聊天）',
+    scheme: null,
+    androidPackage: null,
+    iosBundleId: null,
+    importKind: 'unconfirmed',
+    platform: 'all',
+    note: '开源恋爱/角色聊天客户端，设置里可填自定义端点但无对外导入协议；启动后由悬浮窗凭证层兜底',
+  },
+  {
     id: 'chatterui',
     name: 'ChatterUI（开源）',
     scheme: null,

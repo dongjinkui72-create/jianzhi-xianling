@@ -12,7 +12,7 @@ import type { ApiKeyItem, ApiProtocol, AppSettings, Benefit, ChatClient, Checkin
 import { detectClients, shellCapabilityNote } from '../services/detectApps';
 import { checkKeyHealth } from '../services/healthCheck';
 import { offlineBenefits, refreshRadar, type FetchReport } from '../services/radarFeed';
-import { fetchAdapters } from '../services/adapterFeed';
+import { fetchAdapters, OFFICIAL_ADAPTER_FEED } from '../services/adapterFeed';
 import { autoProvisionApiKey, createSystemAccessToken, doCheckin, fetchCheckinSupport, fetchSelf, httpTransport, joinApiBase, type Transport } from '../services/relayApi';
 
 interface NewKeyInput {

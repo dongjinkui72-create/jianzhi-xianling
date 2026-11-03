@@ -21,7 +21,7 @@
         "backgroundColor": "#F7FAFF"
       },
       "permissions": [],
-      "versionCode": 2
+      "versionCode": 3
     },
     "ios": {
       "bundleIdentifier": "com.jianzhi.xianling",
