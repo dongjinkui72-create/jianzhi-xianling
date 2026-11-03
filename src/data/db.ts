@@ -207,7 +207,7 @@ export async function getDb(): Promise<SQLite.SQLiteDatabase> {
 export const DEFAULT_SETTINGS: AppSettings = {
   lowTokenThreshold: 200000,
   lowUsdThreshold: 0.5,
-  preferredClientId: null,
+  preferredClientId: 'chatbox',
   alwaysAskClient: true,
   feedUrls: [],
   adapterFeedUrls: [],

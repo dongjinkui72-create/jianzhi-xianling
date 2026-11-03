@@ -69,9 +69,9 @@ export function LaunchProvider({ children }: { children: React.ReactNode }) {
     // 只把「能把密钥全自动写进去」的软件当作候选；不可导入的官方 App 不参与启动流程
     const usable = app.clients.filter(
       (c) =>
-        canAutoImport(c) &&
-        (c.browserBased || c.detected !== 'not_installed') &&
-        (c.platform === 'all' || c.platform === Platform.OS),
+        (c.platform === 'all' || c.platform === Platform.OS) &&
+        ((canAutoImport(c) && (c.browserBased || c.detected !== 'not_installed')) ||
+          (c.importKind === 'unconfirmed' && c.detected === 'installed')),
     );
     const rank = (c: ChatClient) => (canAutoImport(c) ? 0 : c.detected === 'installed' ? 1 : 2);
     return [...usable].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
@@ -165,6 +165,7 @@ export function LaunchProvider({ children }: { children: React.ReactNode }) {
                       label={c.detected === 'installed' ? '已识别安装' : c.detected === 'unknown' ? '安装状态无法确认' : '未安装'}
                       tone={c.detected === 'installed' ? 'accent' : 'muted'}
                     />
+                    {!auto && c.detected === 'installed' ? <Chip label='悬浮窗送达' tone='warn' /> : null}
                   </View>
                 </View>
                 <Ionicons name="chevron-forward" size={sc.s(18)} color={palette.inkFaint} />

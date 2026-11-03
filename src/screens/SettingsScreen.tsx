@@ -31,8 +31,6 @@ export function SettingsScreen({ navigation }: any) {
   const [installedOpen, setInstalledOpen] = useState(false);
   const [installed, setInstalled] = useState<InstalledApp[]>([]);
   const [installedBusy, setInstalledBusy] = useState(false);
-  const [adapterSheetOpen, setAdapterSheetOpen] = useState(false);
-  const [feedUrl, setFeedUrl] = useState('');
   const [scanning, setScanning] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [baseEdit, setBaseEdit] = useState<{ id: string; value: string } | null>(null);
@@ -40,6 +38,7 @@ export function SettingsScreen({ navigation }: any) {
 
   /** 只保留可导入的适配器 */
   const importable = app.clients.filter((c) => canAutoImport(c));
+  const overlayApps = app.clients.filter((c) => !canAutoImport(c) && c.importKind !== 'launch_only' && c.detected === 'installed');
   const preferred = importable.find((c) => c.id === app.settings.preferredClientId) ?? null;
 
   const rescan = async () => {
@@ -131,20 +130,6 @@ export function SettingsScreen({ navigation }: any) {
     await app.rescanClients();
   };
 
-  const submitAdapterFeed = async () => {
-    const u = feedUrl.trim();
-    if (!/^https?:\/\//i.test(u)) {
-      setNote('清单地址必须是 http(s)');
-      return;
-    }
-    const next = Array.from(new Set([...app.settings.adapterFeedUrls, u]));
-    await app.patchSettings({ adapterFeedUrls: next });
-    setFeedUrl('');
-    setAdapterSheetOpen(false);
-    setNote('已添加适配器清单，正在拉取…');
-    await app.refreshAdapters(true);
-  };
-
   const ClientRow = ({ c }: { c: ChatClient }) => {
     const isPref = app.settings.preferredClientId === c.id;
     return (
@@ -209,37 +194,28 @@ export function SettingsScreen({ navigation }: any) {
             {importable.map((c) => (
               <ClientRow key={c.id} c={c} />
             ))}
+            {overlayApps.length ? (
+              <View style={{ marginTop: sc.s(10) }}>
+                <Text style={{ fontSize: sc.fs(12.5), fontWeight: '800', color: palette.inkSoft, marginBottom: sc.s(4) }}>已识别 · 悬浮窗送达</Text>
+                {overlayApps.map((c) => (
+                  <View key={c.id} style={{ flexDirection: 'row', alignItems: 'center', gap: sc.s(9), paddingVertical: sc.s(8), borderTopWidth: 1, borderTopColor: palette.hairlineSoft }}>
+                    <View style={{ width: sc.s(30), height: sc.s(30), borderRadius: sc.s(9), backgroundColor: palette.warnSoft, alignItems: 'center', justifyContent: 'center' }}>
+                      <Ionicons name="layers-outline" size={sc.s(15)} color={palette.warn} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text numberOfLines={1} style={{ fontSize: sc.fs(13), fontWeight: '700', color: palette.ink }}>{c.name}</Text>
+                      <Text numberOfLines={1} style={{ fontSize: sc.fs(10), color: palette.inkFaint }}>{c.androidPackage}</Text>
+                    </View>
+                    <Chip label="悬浮窗送达" tone="warn" />
+                    {c.source === 'auto' ? <IconButton icon="trash-outline" size={15} tone="danger" onPress={() => app.removeCustomClient(c.id)} /> : null}
+                  </View>
+                ))}
+              </View>
+            ) : null}
             {importable.length === 0 ? (
               <Text style={{ fontSize: sc.fs(12), color: palette.inkFaint, paddingVertical: sc.s(10) }}>还没有可导入的软件。点「从已安装应用添加」，或先安装 Chatbox。</Text>
             ) : null}
           </View>
-        </Glass>
-
-        {/* 适配器清单 */}
-        <Glass style={{ marginBottom: sc.s(13) }} pad={sc.s(14)}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: sc.s(6) }}>
-            <Ionicons name="git-branch-outline" size={sc.s(18)} color={palette.accent} />
-            <Text style={{ marginLeft: sc.s(8), flex: 1, fontSize: sc.fs(16), fontWeight: '800', color: palette.ink }}>导入适配器清单</Text>
-            <GlassButton label="立即拉取" icon="cloud-download-outline" size="sm" tone="muted" onPress={() => app.refreshAdapters(true)} />
-          </View>
-          <GlassButton label="添加清单地址" icon="add-outline" size="sm" onPress={() => setAdapterSheetOpen(true)} />
-          {app.settings.adapterFeedUrls.length ? (
-            <View style={{ marginTop: sc.s(9) }}>
-              {app.settings.adapterFeedUrls.map((u) => (
-                <View key={u} style={{ flexDirection: 'row', alignItems: 'center', gap: sc.s(8), paddingVertical: sc.s(7), borderTopWidth: 1, borderTopColor: palette.hairlineSoft }}>
-                  <Text numberOfLines={1} style={{ flex: 1, fontSize: sc.fs(11.5), color: palette.inkSoft }}>{u}</Text>
-                  <IconButton icon="trash-outline" size={15} tone="danger" onPress={() => app.patchSettings({ adapterFeedUrls: app.settings.adapterFeedUrls.filter((x) => x !== u) })} />
-                </View>
-              ))}
-            </View>
-          ) : null}
-          {app.adapterNotes.length ? (
-            <View style={{ marginTop: sc.s(8) }}>
-              {app.adapterNotes.map((t, i) => (
-                <Text key={i} style={{ fontSize: sc.fs(10.5), color: palette.inkFaint, lineHeight: sc.fs(15) }}>· {t}</Text>
-              ))}
-            </View>
-          ) : null}
         </Glass>
 
         {/* 预警阈值 */}
@@ -328,11 +304,6 @@ export function SettingsScreen({ navigation }: any) {
         {q.trim() && !installedBusy && matches.apps.length === 0 && matches.seeds.length === 0 ? (
           <Notice tone="warn">没搜到匹配的软件。换个关键词，或在「导入适配器清单」里补它的协议。</Notice>
         ) : null}      </Sheet>
-
-      {/* 适配器清单地址 */}
-      <Sheet visible={adapterSheetOpen} onClose={() => setAdapterSheetOpen(false)} title="添加适配器清单" footer={<GlassButton label="添加并拉取" icon="cloud-download-outline" size="lg" onPress={submitAdapterFeed} />}>
-        <Field label="清单 JSON 地址" value={feedUrl} onChangeText={setFeedUrl} placeholder="https://raw.githubusercontent.com/你的仓库/main/adapters/clients.json" keyboardType="url" autoCapitalize="none" />
-      </Sheet>
 
       {/* base 地址编辑 */}
       <Sheet

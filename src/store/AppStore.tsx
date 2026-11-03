@@ -9,7 +9,8 @@ import { maskKey, quotaToUsd, todayKey, usdToTokensEstimate } from '../lib/forma
 import { normalizeUrl, siteKeyOf } from '../lib/normalize';
 import { secretRef, uid } from '../lib/id';
 import type { ApiKeyItem, ApiProtocol, AppSettings, Benefit, ChatClient, CheckinLog, Relay } from '../lib/types';
-import { detectClients, shellCapabilityNote } from '../services/detectApps';
+import { detectClients, reconcileWithInstalled, shellCapabilityNote } from '../services/detectApps';
+import { listInstalledApps } from '../native/installedApps';
 import { checkKeyHealth } from '../services/healthCheck';
 import { offlineBenefits, refreshRadar, type FetchReport } from '../services/radarFeed';
 import { fetchAdapters, OFFICIAL_ADAPTER_FEED } from '../services/adapterFeed';
@@ -116,7 +117,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       try {
         await DB.getDb();
         const s = await DB.loadSettings();
-        setSettings(s);
+        const boot = s.preferredClientId == null ? { ...s, preferredClientId: 'chatbox' } : s;
+        if (boot.preferredClientId !== s.preferredClientId) await DB.saveSettings({ preferredClientId: 'chatbox' });
+        setSettings(boot);
 
         // 聊天软件登记表：首次写入内置清单
         let cs = await DB.listClients();
@@ -198,10 +201,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const note = shellCapabilityNote();
       if (!cancelled) setScanNote(note);
       try {
-        const detected = await detectClients(clients);
-        if (cancelled) return;
-        setClients(detected);
-        for (const c of detected) await DB.upsertClient(c);
+        if (!cancelled) await rescanClients();
         refreshAdapters(false).catch(() => {});
       } catch {
         /* 扫描失败不影响主流程 */
@@ -630,11 +630,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   /* ------------------------------ 聊天软件 ------------------------------ */  const rescanClients = useCallback(async () => {
     const note = shellCapabilityNote();
     setScanNote(note);
-    const detected = await detectClients(clients);
-    setClients(detected);
-    for (const c of detected) await DB.upsertClient(c);
-  }, [clients]);
-
+    // 第一层：全量已安装列表（QUERY_ALL_PACKAGES），包名精确匹配 + 名称启发式自动建档
+    const installed = await listInstalledApps();
+    let cur = await DB.listClients();
+    const { updates, creates } = reconcileWithInstalled(installed, cur);
+    for (const u of updates) await DB.upsertClient(u);
+    for (const n of creates) await DB.upsertClient(n);
+    cur = await DB.listClients();
+    // 第二层：scheme 白名单探测（只跑还没被包名确认的）
+    const needScheme = cur.filter((c) => !!c.scheme && c.detected !== 'installed');
+    const detected = await detectClients(needScheme);
+    for (const d of detected) await DB.upsertClient(d);
+    setClients(await DB.listClients());
+  }, []);
   const addCustomClient = useCallback(
     async (input: {
       name: string;

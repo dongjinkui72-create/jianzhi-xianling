@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { KeyboardAvoidingView, Platform, Text, TextInput, View } from 'react-native';
+import { KeyboardAvoidingView, Linking, Platform, Text, TextInput, View } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -48,6 +48,8 @@ export function RelayWebScreen({ route, navigation }: any) {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<AutoResult | null>(null);
   const [pasteOpen, setPasteOpen] = useState(false);
+  const [httpError, setHttpError] = useState<number | null>(null);
+  const retries = useRef(0);
   const [pkLabel, setPkLabel] = useState('');
   const [pkKey, setPkKey] = useState('');
   const [pkBase, setPkBase] = useState(joinApiBase(initialUrl));
@@ -271,7 +273,21 @@ export function RelayWebScreen({ route, navigation }: any) {
           injectedJavaScriptBeforeContentLoaded={SPY_JS}
           onMessage={(e) => bridge.handleMessage(e.nativeEvent.data)}
           onLoadStart={() => setLoading(true)}
-          onLoadEnd={() => setLoading(false)}
+          userAgent="Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
+          cacheEnabled={false}
+          onHttpErrorReceived={(e: any) => {
+            const code = e?.nativeEvent?.statusCode ?? 0;
+            if (code >= 500 && retries.current < 2) {
+              retries.current += 1;
+              setTimeout(() => webRef.current?.reload(), 1500);
+              return;
+            }
+            setHttpError(code);
+          }}
+          onLoadEnd={() => {
+            setLoading(false);
+            retries.current = 0;
+          }}
           onError={() => setLoading(false)}
           onNavigationStateChange={(nav: any) => bridge.setOrigin(nav?.url)}
           originWhitelist={['*']}
@@ -291,6 +307,17 @@ export function RelayWebScreen({ route, navigation }: any) {
         ) : null}
       </View>
 
+      {httpError ? (
+        <View style={{ paddingHorizontal: sc.gutter, paddingTop: sc.s(8), backgroundColor: palette.dangerSoft }}>
+          <Notice tone="danger" title={"站点返回 "}>
+            这是站点侧问题（Cloudflare 报告源站异常或网络不可达），不是 App 拦截。可重试，或改用系统浏览器打开后回到这里手动粘贴密钥。
+          </Notice>
+          <View style={{ flexDirection: 'row', gap: sc.s(8), marginTop: sc.s(8), marginBottom: sc.s(8) }}>
+            <GlassButton label="重试" icon="refresh" size="sm" onPress={() => { setHttpError(null); retries.current = 0; webRef.current?.reload(); }} />
+            <GlassButton label="浏览器打开" icon="open-outline" size="sm" tone="muted" onPress={() => Linking.openURL(url).catch(() => {})} />
+          </View>
+        </View>
+      ) : null}
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <View style={{ paddingHorizontal: sc.gutter, paddingTop: sc.s(10), paddingBottom: insets.bottom + sc.s(12) + kb, backgroundColor: 'rgba(250,252,255,0.97)', borderTopWidth: 1, borderTopColor: palette.hairline, flexDirection: 'row', gap: sc.s(9) }}>
           <View style={{ flex: 1 }}>

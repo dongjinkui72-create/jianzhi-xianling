@@ -81,3 +81,72 @@ export function storeUrl(c: ChatClient): string | null {
   }
   return null;
 }
+/** 开源 AI 聊天 / AI 恋爱聊天客户端的名称特征（GitHub 生态常见命名） */
+export const CLIENT_LABEL_HINTS = [
+  'tavern',
+  'risu',
+  'chatbox',
+  'lobe',
+  'cherry studio',
+  'cherrystudio',
+  'nextchat',
+  'deepchat',
+  'chatterui',
+  'opencat',
+  'boltai',
+  'chatwise',
+];
+
+export interface ReconcileResult {
+  updates: ChatClient[];
+  creates: ChatClient[];
+}
+
+/**
+ * 用「全量已安装应用列表」做三层识别：
+ *  1. 包名精确命中登记表 / 远程清单；
+ *  2. 名称启发式命中开源客户端生态（tavern / risu / chatbox / lobe …），
+ *     自动建档为「悬浮窗送达」适配器，GitHub 上新出的同类软件也能被认出来；
+ *  3. 其余仍走 scheme 白名单探测。
+ */
+export function reconcileWithInstalled(installed: { label: string; packageName: string }[], clients: ChatClient[]): ReconcileResult {
+  const updates: ChatClient[] = [];
+  const creates: ChatClient[] = [];
+  const byPkg = new Map(installed.map((a) => [a.packageName.toLowerCase(), a]));
+
+  for (const c of clients) {
+    if (!c.androidPackage) continue;
+    const hit = byPkg.get(c.androidPackage.toLowerCase());
+    const status: DetectStatus = hit ? 'installed' : c.browserBased ? c.detected : 'not_installed';
+    if (status !== c.detected) {
+      updates.push({ ...c, detected: status, detectReason: hit ? '已在本机安装列表中找到' : '本机安装列表中未找到' });
+    }
+  }
+
+  const knownPkgs = new Set(clients.map((c) => (c.androidPackage || '').toLowerCase()).filter(Boolean));
+  const knownIds = new Set(clients.map((c) => c.id));
+  for (const a of installed) {
+    const key = a.packageName.toLowerCase();
+    if (knownPkgs.has(key)) continue;
+    const hay = `${a.label} ${a.packageName}`.toLowerCase();
+    if (!CLIENT_LABEL_HINTS.some((h) => hay.includes(h))) continue;
+    const id = 'auto_' + a.packageName.replace(/[^a-z0-9_]/g, '_');
+    if (knownIds.has(id)) continue;
+    creates.push({
+      id,
+      name: a.label,
+      scheme: null,
+      androidPackage: a.packageName,
+      iosBundleId: null,
+      importKind: 'unconfirmed',
+      platform: 'all',
+      builtin: false,
+      detected: 'installed',
+      detectReason: '按名称自动识别；无已知导入协议，启动时用悬浮窗凭证层送达',
+      addedAt: Date.now(),
+      source: 'auto',
+      note: '自动识别到的客户端；没有已知导入协议，启动时用悬浮窗凭证层送达',
+    });
+  }
+  return { updates, creates };
+}

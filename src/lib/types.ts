@@ -148,7 +148,7 @@ export interface ChatClient {
   detectReason: string | null;
   addedAt: number;
   /** 适配器来源：内置 / 远程清单 / 用户自建 */
-  source: 'builtin' | 'feed' | 'custom';
+  source: 'builtin' | 'feed' | 'custom' | 'auto';
 }
 
 export interface AppSettings {
