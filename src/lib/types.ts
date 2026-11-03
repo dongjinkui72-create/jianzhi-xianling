@@ -164,4 +164,6 @@ export interface AppSettings {
   autoHealthCheck: boolean;
   lastRadarFetchAt: number | null;
   lastAdapterFetchAt: number | null;
+  /** 已读通告的版本号 */
+  announcementSeen: string | null;
 }

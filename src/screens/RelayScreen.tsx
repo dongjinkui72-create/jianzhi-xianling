@@ -52,6 +52,8 @@ export function RelayScreen() {
   const [pkProtocol, setPkProtocol] = useState<ApiProtocol>('openai_compatible');
 
   const saved = useMemo(() => app.relays.filter((r) => r.hasSession || r.userId || r.accessTokenRef), [app.relays]);
+  /** 每日签到列表：登录时检测到有免费签到的站点会自动进这里 */
+  const checkinList = useMemo(() => saved.filter((r) => r.checkinSupport === 'yes'), [saved]);
   const directory = useMemo(() => app.relays.filter((r) => !(r.hasSession || r.userId || r.accessTokenRef)), [app.relays]);
   const today = todayKey();
   const todayDone = useMemo(
@@ -173,31 +175,28 @@ export function RelayScreen() {
         <Glass pad={sc.s(15)} style={{ marginBottom: sc.s(14) }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: sc.s(4) }}>
             <Ionicons name="calendar-outline" size={sc.s(19)} color={palette.accent} />
-            <Text style={{ flex: 1, marginLeft: sc.s(8), fontSize: sc.fs(17), fontWeight: '800', color: palette.ink }}>一键签到</Text>
+            <Text style={{ flex: 1, marginLeft: sc.s(8), fontSize: sc.fs(17), fontWeight: '800', color: palette.ink }}>每日签到</Text>
             <GlassButton label="签到日志" icon="receipt-outline" size="sm" tone="muted" onPress={() => setLogOpen(true)} />
           </View>
-          <Text style={{ fontSize: sc.fs(11.5), color: palette.inkFaint, lineHeight: sc.fs(17), marginBottom: sc.s(11) }}>
-            App 内代理请求各站点的签到接口，可一次签到多个已保存站点，结果只写入本机日志。
-          </Text>
 
           <GlassButton
             label={app.checkinBusy ? '签到中…' : `全部签到（${saved.length}）`}
             icon="flash"
             size="lg"
             loading={app.checkinBusy}
-            disabled={!saved.length || app.checkinBusy}
+            disabled={!checkinList.length || app.checkinBusy}
             onPress={doCheckinAll}
           />
 
-          {!saved.length ? (
+          {!checkinList.length ? (
             <View style={{ marginTop: sc.s(11) }}>
-              <Notice tone="warn" title="还没有已登录的站点">
-                签到需要站点登录态。请先在下方「站点目录」里挑一个站点，点「打开并登录」，登录成功后 App 会尝试保存长期访问令牌，之后就能一键代理签到。
+              <Notice tone="warn" title="还没有可签到的站点">
+                登录后 App 会自动检测该站有没有免费签到：有就加进这个列表，没有就只建档。
               </Notice>
             </View>
           ) : (
             <View style={{ marginTop: sc.s(12) }}>
-              {saved.map((r) => (
+              {checkinList.map((r) => (
                 <View key={r.id} style={{ flexDirection: 'row', alignItems: 'center', gap: sc.s(9), paddingVertical: sc.s(8), borderTopWidth: 1, borderTopColor: palette.hairlineSoft }}>
                   <View style={{ flex: 1 }}>
                     <Text numberOfLines={1} style={{ fontSize: sc.fs(13.5), fontWeight: '700', color: palette.ink }}>{r.name}</Text>
@@ -219,11 +218,6 @@ export function RelayScreen() {
             </View>
           )}
 
-          <View style={{ marginTop: sc.s(11) }}>
-            <Notice tone="muted" title="如实说明">
-              对未开启签到功能、或开启了人机验证（Turnstile）的站点，App 只会告诉你「只能手动签到」，不会伪造签到成功。日志里的 manual_only 就是这种情况。
-            </Notice>
-          </View>
         </Glass>
 
         {/* ===================== 本地已保存的中转站（默认折叠） ===================== */}
@@ -329,9 +323,6 @@ export function RelayScreen() {
         {/* ===================== 手动入口 ===================== */}
         <Glass style={{ marginTop: sc.s(4), marginBottom: sc.s(12) }} pad={sc.s(14)}>
           <Text style={{ fontSize: sc.fs(15), fontWeight: '800', color: palette.ink, marginBottom: sc.s(6) }}>站点结构不支持自动建档？</Text>
-          <Text style={{ fontSize: sc.fs(11.5), color: palette.inkSoft, lineHeight: sc.fs(17), marginBottom: sc.s(11) }}>
-            少数站点的面板不是 New API / One API 架构，App 无法代替它创建密钥。遇到这种情况 App 会如实提示，你可以用下面的入口把密钥手动建档，同样只存本机。
-          </Text>
           <View style={{ flexDirection: 'row', gap: sc.s(8), flexWrap: 'wrap' }}>
             <GlassButton label="手动粘贴 API Key" icon="key-outline" onPress={() => setPasteOpen(true)} />
             <GlassButton label="添加自定义站点" icon="add-circle-outline" tone="muted" onPress={() => setAddOpen(true)} />

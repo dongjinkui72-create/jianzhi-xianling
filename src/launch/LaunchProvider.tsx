@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Busy, Chip, GlassButton, Notice, Sheet } from '../components/Bits';
 import { Glass } from '../components/Glass';
 import { apiHostFor, canAutoImport, launchWithImport, type LaunchResult } from '../services/launcher';
+import { canOverlay, requestOverlay, showCredentialOverlay } from '../native/overlay';
 import { navigationRef } from '../navigation/navRef';
 import { useApp } from '../store/AppStore';
 import { palette } from '../theme/tokens';
@@ -45,6 +46,8 @@ export function LaunchProvider({ children }: { children: React.ReactNode }) {
   const [result, setResult] = useState<LaunchResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [noAppOpen, setNoAppOpen] = useState(false);
+  const [overlayPrompt, setOverlayPrompt] = useState(false);
+  const [pendingCred, setPendingCred] = useState<{ title: string; base: string; key: string } | null>(null);
 
   const selectedKey = useMemo(
     () => app.keys.find((k) => k.id === app.selectedKeyId) ?? null,
@@ -80,7 +83,20 @@ export function LaunchProvider({ children }: { children: React.ReactNode }) {
       setPickerOpen(false);
       try {
         const secret = await app.getSecretOf(selectedKey);
-        const res = await launchWithImport(client, selectedKey, secret);
+        let res = await launchWithImport(client, selectedKey, secret);
+        // 没有自动导入协议的软件：用悬浮窗凭证层兜底（默认收起，点一下才显示，长按关闭）
+        if ((res.mode === 'launch_only' || res.mode === 'unconfirmed') && secret) {
+          const allowed = await canOverlay();
+          if (allowed) {
+            const shown = await showCredentialOverlay(`${client.name} · 凭证`, apiHostFor(selectedKey), secret);
+            if (shown) {
+              res = { ...res, message: `${res.message} 已开启悬浮窗凭证层：小圆钮点一下显示地址与密钥（可复制），再点收起，长按关闭。` };
+            }
+          } else {
+            setPendingCred({ title: `${client.name} · 凭证`, base: apiHostFor(selectedKey), key: secret });
+            setOverlayPrompt(true);
+          }
+        }
         buzz();
         setResult(res);
         setResultOpen(true);
@@ -187,6 +203,33 @@ export function LaunchProvider({ children }: { children: React.ReactNode }) {
         </Notice>
         <View style={{ height: sc.s(10) }} />
         <GlassButton label="重新扫描一次" icon="refresh-outline" onPress={async () => { setNoAppOpen(false); await app.rescanClients(); }} />
+      </Sheet>
+
+      {/* 悬浮窗权限提示 */}
+      <Sheet
+        visible={overlayPrompt}
+        onClose={() => setOverlayPrompt(false)}
+        title="这个 App 没有自动导入协议"
+        footer={
+          <GlassButton
+            label="开启悬浮窗权限并显示凭证"
+            icon="layers-outline"
+            size="lg"
+            onPress={async () => {
+              const okReq = await requestOverlay();
+              setOverlayPrompt(false);
+              if (okReq && pendingCred) {
+                setTimeout(async () => {
+                  if (await canOverlay()) await showCredentialOverlay(pendingCred.title, pendingCred.base, pendingCred.key);
+                }, 1200);
+              }
+            }}
+          />
+        }
+      >
+        <Notice tone="warn" title="改用悬浮窗凭证层">
+          {" 不接受外部写入配置。授权「显示在其他应用上层」后，本 App 会把调用地址与密钥以悬浮窗盖在它界面上：默认收起，点一下显示并可复制，再点收起，长按关闭。"}
+        </Notice>
       </Sheet>
 
       {/* 启动结果（如实回报） */}

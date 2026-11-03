@@ -209,6 +209,39 @@ export const CHAT_APP_REGISTRY: Seed[] = [
     platform: 'ios',
     note: '未核实到可自动写入密钥的协议',
   },
+
+  /* ---------- 开源 tavern 系 / 其它接受自定义端点但无对外导入协议的客户端：悬浮窗凭证层兜底 ---------- */
+  {
+    id: 'sillytavern',
+    name: 'SillyTavern（tavern）',
+    scheme: null,
+    androidPackage: null,
+    iosBundleId: null,
+    importKind: 'unconfirmed',
+    browserBased: true,
+    platform: 'all',
+    note: '开源 Web UI，设置里可填自定义端点但没有对外导入协议；启动后由悬浮窗凭证层把地址与密钥送到它界面上',
+  },
+  {
+    id: 'tauritavern',
+    name: 'TauriTavern（tauritavern）',
+    scheme: 'tauritavern',
+    androidPackage: null,
+    iosBundleId: null,
+    importKind: 'unconfirmed',
+    platform: 'all',
+    note: 'Tauri 桌面客户端，无对外导入协议；启动后由悬浮窗凭证层兜底',
+  },
+  {
+    id: 'chatterui',
+    name: 'ChatterUI（开源）',
+    scheme: null,
+    androidPackage: null,
+    iosBundleId: null,
+    importKind: 'unconfirmed',
+    platform: 'all',
+    note: '开源 Android 客户端，设置里可填端点但无对外协议；悬浮窗凭证层兜底',
+  },
 ];
 
 /** 具备「全自动写入配置」能力的适配器 */

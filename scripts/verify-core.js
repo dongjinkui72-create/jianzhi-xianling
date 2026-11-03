@@ -126,6 +126,10 @@ t('每条情报都有「怎么领」步骤和链接', () => {
     assert.ok(b.title && b.provider, b.id + ' 缺标题');
   }
 });
+t('中转站抓取关键词为 api + 中转站', () => {
+  const F = require(path.join(base, 'services', 'radarFeed.js'));
+  assert.deepStrictEqual(F.RELAY_KEYWORDS, ['api', '中转站']);
+});
 t('中转站情报都命中关键词 api', () => {
   for (const b of S.allSeedBenefits().filter((x) => x.section === 'relay')) {
     const hay = (b.title + b.summary + b.keywords.join(' ')).toLowerCase();

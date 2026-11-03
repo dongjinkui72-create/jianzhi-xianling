@@ -18,6 +18,9 @@ import type { Benefit, Confidence } from '../lib/types';
  * 中转站内容按关键词 api 抓取，验收 ≥ 5 条（内置种子离线也达标）。
  */
 
+const GITHUB_URL = 'https://github.com/dongjinkui72-create/jianzhi-xianling';
+const ANNOUNCE_VERSION = '2.0.0';
+
 const CONF: Record<Confidence, { label: string; tone: 'ok' | 'accent' | 'muted' }> = {
   verified: { label: '已核实', tone: 'ok' },
   likely: { label: '大概率有效', tone: 'accent' },
@@ -66,7 +69,7 @@ function GroupHeader({ title, count, accent }: { title: string; count: number; a
 
 export function RadarScreen() {
   const sc = useScale();
-  const { benefits, refreshRadar, radarBusy, radarStage, report, settings } = useApp();
+  const { benefits, refreshRadar, radarBusy, radarStage, report, settings, patchSettings } = useApp();
   const [refreshing, setRefreshing] = useState(false);
   const [detail, setDetail] = useState<Benefit | null>(null);
 
@@ -107,6 +110,21 @@ export function RadarScreen() {
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={palette.accent} colors={[palette.accent]} />}
       >
+        {settings.announcementSeen !== ANNOUNCE_VERSION ? (
+          <Glass pad={sc.s(13)} style={{ marginBottom: sc.s(10) }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sc.s(8) }}>
+              <Ionicons name="megaphone-outline" size={sc.s(17)} color={palette.accent} />
+              <Text style={{ flex: 1, fontSize: sc.fs(14), fontWeight: '800', color: palette.ink }}>通告</Text>
+              <IconButton icon="close" size={16} tone="muted" onPress={() => patchSettings({ announcementSeen: ANNOUNCE_VERSION })} />
+            </View>
+            <Text style={{ marginTop: sc.s(7), fontSize: sc.fs(12), color: palette.inkSoft, lineHeight: sc.fs(19) }}>
+              剪纸仙灵免费且开源：雷达站每日抓取免费额度情报、中转站登录自动建档密钥、每日签到、启动聊天软件全自动导入密钥与调用地址。代码开源，可在 GitHub 查看；觉得好用请点亮 Star。如遇任何人以本软件名义收费，那就是你被骗了——本软件不收取任何费用。
+            </Text>
+            <View style={{ marginTop: sc.s(9) }}>
+              <GlassButton label="去 GitHub 查看 / 点 Star" icon="star-outline" size="sm" onPress={() => Linking.openURL(GITHUB_URL).catch(() => {})} />
+            </View>
+          </Glass>
+        ) : null}
         {radarBusy ? (
           <Glass pad={sc.s(12)} style={{ marginBottom: sc.s(10) }}>
             <Busy label={radarStage || '正在抓取情报…'} />
@@ -166,11 +184,6 @@ export function RadarScreen() {
           </View>
         )}
 
-        <View style={{ marginTop: sc.s(6) }}>
-          <Notice tone="muted">
-            额度情报来自公开页面抓取，已做「上下文窗口 / 速率限制」噪声排除；标注「无法确认」的条目表示本次没能核实，App 不会谎报。点卡片看完整「怎么领」步骤。
-          </Notice>
-        </View>
       </ScrollView>
 
       {/* 情报详情 */}

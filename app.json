@@ -2,7 +2,7 @@
   "expo": {
     "name": "剪纸仙灵",
     "slug": "jianzhi-xianling",
-    "version": "1.0.0",
+    "version": "2.0.0",
     "scheme": "jianzhi",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -43,7 +43,8 @@
           }
         }
       ],
-      "expo-splash-screen"
+      "expo-splash-screen",
+      "./plugins/withOverlayModule"
     ],
     "experiments": {
       "typedRoutes": false

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Linking, Platform, Pressable, ScrollView, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Application from 'expo-application';
@@ -37,6 +37,7 @@ export function SettingsScreen({ navigation }: any) {
   const [scanning, setScanning] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [baseEdit, setBaseEdit] = useState<{ id: string; value: string } | null>(null);
+  const [q, setQ] = useState('');
 
   /** 只保留可导入的适配器 */
   const importable = app.clients.filter((c) => canAutoImport(c));
@@ -50,6 +51,34 @@ export function SettingsScreen({ navigation }: any) {
     } finally {
       setScanning(false);
     }
+  };
+
+  const matches = useMemo(() => {
+    const key = q.trim().toLowerCase();
+    if (!key) return { apps: [] as InstalledApp[], seeds: [] as typeof CHAT_APP_REGISTRY };
+    const apps = installed.filter((a) => a.label.toLowerCase().includes(key) || a.packageName.toLowerCase().includes(key));
+    const seeds = CHAT_APP_REGISTRY.filter(
+      (s) =>
+        (s.name.toLowerCase().includes(key) || (s.androidPackage ?? '').toLowerCase().includes(key)) &&
+        !app.clients.some((c) => c.id === s.id),
+    );
+    return { apps, seeds };
+  }, [q, installed, app.clients]);
+
+  const addSeed = async (s: (typeof CHAT_APP_REGISTRY)[number]) => {
+    await app.addCustomClient({
+      name: s.name,
+      scheme: s.scheme ?? '',
+      importKind: s.importKind,
+      importTemplate: s.importTemplate,
+      settingsTemplate: s.settingsTemplate,
+      settingsBase: s.settingsBase,
+      launchTemplate: s.launchTemplate,
+      browserBased: s.browserBased,
+    });
+    setInstalledOpen(false);
+    setQ('');
+    setNote(canAutoImport(s) ? '已添加，导入方式由 App 自动识别。' : '已添加；它没有对外导入协议，启动时会用悬浮窗凭证层兜底。');
   };
 
   const openInstalled = async () => {
@@ -163,7 +192,7 @@ export function SettingsScreen({ navigation }: any) {
 
   return (
     <ScreenShell>
-      <Header title="设置" subtitle="所有配置都只存在这台手机上" right={<IconButton icon="close" onPress={() => navigation.goBack()} tone="muted" />} />
+      <Header title="设置" right={<IconButton icon="close" onPress={() => navigation.goBack()} tone="muted" />} />
 
       <ScrollView contentContainerStyle={{ paddingHorizontal: sc.gutter, paddingBottom: sc.s(40) }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
         {note ? (
@@ -179,9 +208,6 @@ export function SettingsScreen({ navigation }: any) {
             <Text style={{ flex: 1, marginLeft: sc.s(8), fontSize: sc.fs(16), fontWeight: '800', color: palette.ink }}>AI 聊天软件（可导入）</Text>
             <GlassButton label={scanning ? '扫描中' : '重新扫描'} icon="refresh-outline" size="sm" tone="muted" loading={scanning} onPress={rescan} />
           </View>
-          <Text style={{ fontSize: sc.fs(11.5), color: palette.inkFaint, lineHeight: sc.fs(17), marginBottom: sc.s(9) }}>
-            这里只列出能把密钥全自动写进去的软件（当前 {importable.length} 个）。ChatGPT、Claude、Gemini、豆包这类不接受第三方密钥的官方 App 不会出现在这里，因为它们没有可导入的入口。
-          </Text>
 
           {app.scanNote ? (
             <View style={{ marginBottom: sc.s(10) }}>
@@ -219,9 +245,6 @@ export function SettingsScreen({ navigation }: any) {
             <Text style={{ marginLeft: sc.s(8), flex: 1, fontSize: sc.fs(16), fontWeight: '800', color: palette.ink }}>导入适配器清单</Text>
             <GlassButton label="立即拉取" icon="cloud-download-outline" size="sm" tone="muted" onPress={() => app.refreshAdapters(true)} />
           </View>
-          <Text style={{ fontSize: sc.fs(11.5), color: palette.inkFaint, lineHeight: sc.fs(17), marginBottom: sc.s(9) }}>
-            「能不能自动导入」是数据而不是写死的代码。加一个清单地址，GitHub 上新出的开源聊天软件就能在不更新 App 的情况下被支持。
-          </Text>
           <GlassButton label="添加清单地址" icon="add-outline" size="sm" onPress={() => setAdapterSheetOpen(true)} />
           {app.settings.adapterFeedUrls.length ? (
             <View style={{ marginTop: sc.s(9) }}>
@@ -248,9 +271,6 @@ export function SettingsScreen({ navigation }: any) {
             <Ionicons name="alert-circle-outline" size={sc.s(18)} color={palette.danger} />
             <Text style={{ marginLeft: sc.s(8), flex: 1, fontSize: sc.fs(16), fontWeight: '800', color: palette.ink }}>可用池预警阈值</Text>
           </View>
-          <Text style={{ fontSize: sc.fs(11.5), color: palette.inkFaint, lineHeight: sc.fs(17), marginBottom: sc.s(11) }}>
-            低于阈值的 Key 会被静默标黄移入预警分组；接口不可用的标红移入无效分组。App 不会弹提示、也不会建议你删除它。
-          </Text>
           <Text style={{ fontSize: sc.fs(12.5), fontWeight: '700', color: palette.inkSoft, marginBottom: sc.s(7) }}>剩余 token 阈值</Text>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sc.s(7), marginBottom: sc.s(10) }}>
             {TOKEN_PRESETS.map((t) => (
@@ -275,9 +295,6 @@ export function SettingsScreen({ navigation }: any) {
             <Text style={{ marginLeft: sc.s(8), flex: 1, fontSize: sc.fs(16), fontWeight: '800', color: palette.ink }}>雷达站情报源</Text>
             <GlassButton label="立即抓取" icon="download-outline" size="sm" tone="muted" loading={app.radarBusy} onPress={() => app.refreshRadar(true)} />
           </View>
-          <Text style={{ fontSize: sc.fs(11.5), color: palette.inkFaint, lineHeight: sc.fs(17), marginBottom: sc.s(9) }}>
-            默认直接抓取内置的官方定价页与中转站首页（关键词 api）。你也可以追加自己的公开情报 JSON。
-          </Text>
           <GlassButton label="添加情报源" icon="add-outline" size="sm" onPress={() => setFeedOpen(true)} />
           {app.settings.feedUrls.length ? (
             <View style={{ marginTop: sc.s(9) }}>
@@ -326,18 +343,26 @@ export function SettingsScreen({ navigation }: any) {
 
       {/* 从已安装应用添加 */}
       <Sheet visible={installedOpen} onClose={() => setInstalledOpen(false)} title="从已安装应用添加">
-        <Notice tone="muted">
-          下面是你手机上已安装的应用。点一个，App 会自动拿它的包名去适配器登记表比对导入方式，不需要你做任何选择；比对不到的会如实标「无法确认」。
-        </Notice>
-        <View style={{ height: sc.s(10) }} />
-        {installedBusy ? <Busy label="正在读取应用列表…" /> : null}
-        {!installedBusy && !appListAvailable() ? (
-          <Notice tone="warn" title="当前环境读不到应用列表">
-            读取已安装应用需要原生模块，Expo Go 里没有。请用开发版/正式安装包运行。
-          </Notice>
+        <Field label="搜索要添加的软件" value={q} onChangeText={setQ} placeholder="输入名称或包名，如 chatbox / tavern" autoCapitalize="none" />
+        {q.trim() && installedBusy ? <Busy label="正在读取应用列表…" /> : null}
+        {q.trim() && !installedBusy && !appListAvailable() ? (
+          <Notice tone="warn" title="当前环境读不到已安装应用">读取应用列表需要原生模块；登记表搜索仍可用。</Notice>
         ) : null}
-        {!installedBusy && appListAvailable() && installed.length === 0 ? <Notice tone="warn">没有读到任何应用。</Notice> : null}
-        {installed.map((a) => {
+        {matches.seeds.map((s) => (
+          <Glass key={s.id} onPress={() => addSeed(s)} style={{ marginBottom: sc.s(8) }} pad={sc.s(11)}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sc.s(9) }}>
+              <View style={{ width: sc.s(32), height: sc.s(32), borderRadius: sc.s(10), backgroundColor: canAutoImport(s) ? palette.okSoft : 'rgba(122,144,178,0.13)', alignItems: 'center', justifyContent: 'center' }}>
+                <Ionicons name={canAutoImport(s) ? 'flash' : 'layers-outline'} size={sc.s(16)} color={canAutoImport(s) ? palette.ok : palette.inkFaint} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text numberOfLines={1} style={{ fontSize: sc.fs(13.5), fontWeight: '700', color: palette.ink }}>{s.name}</Text>
+                <Text numberOfLines={1} style={{ fontSize: sc.fs(10), color: palette.inkFaint }}>登记表 · 自动识别导入方式</Text>
+              </View>
+              <Chip label={canAutoImport(s) ? '可全自动导入' : '悬浮窗兜底'} tone={canAutoImport(s) ? 'ok' : 'muted'} />
+            </View>
+          </Glass>
+        ))}
+        {matches.apps.map((a) => {
           const matched = identify(a.packageName);
           const ok = !!matched && canAutoImport(matched);
           return (
@@ -350,12 +375,14 @@ export function SettingsScreen({ navigation }: any) {
                   <Text numberOfLines={1} style={{ fontSize: sc.fs(13.5), fontWeight: '700', color: palette.ink }}>{a.label}</Text>
                   <Text numberOfLines={1} style={{ fontSize: sc.fs(10), color: palette.inkFaint }}>{a.packageName}</Text>
                 </View>
-                <Chip label={ok ? (matched!.importKind === 'deeplink_import' ? '可全自动导入' : '可 URL 写入') : '无法确认'} tone={ok ? 'ok' : 'muted'} />
+                <Chip label={ok ? '可全自动导入' : '悬浮窗兜底'} tone={ok ? 'ok' : 'muted'} />
               </View>
             </Glass>
           );
         })}
-      </Sheet>
+        {q.trim() && !installedBusy && matches.apps.length === 0 && matches.seeds.length === 0 ? (
+          <Notice tone="warn">没搜到匹配的软件。换个关键词，或在「导入适配器清单」里补它的协议。</Notice>
+        ) : null}      </Sheet>
 
       {/* 适配器清单地址 */}
       <Sheet visible={adapterSheetOpen} onClose={() => setAdapterSheetOpen(false)} title="添加适配器清单" footer={<GlassButton label="添加并拉取" icon="cloud-download-outline" size="lg" onPress={submitAdapterFeed} />}>

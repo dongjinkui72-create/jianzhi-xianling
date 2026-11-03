@@ -73,9 +73,6 @@ function KeyRow({ k, selected, selectable, onSelect, onDetail }: { k: ApiKeyItem
           <Text style={{ fontSize: sc.fs(11.5), color: palette.accent, fontWeight: '800' }}>详情</Text>
         </Pressable>
       </View>
-      {!selectable ? (
-        <Text style={{ marginTop: sc.s(5), fontSize: sc.fs(10), color: palette.inkFaint }}>该分组不可选中启动；重新体检通过后会自动回到绿色分组。</Text>
-      ) : null}
     </Glass>
   );
 }
@@ -185,9 +182,6 @@ export function PoolScreen() {
               {groups.red.length === 0 ? <Text style={{ fontSize: sc.fs(11.5), color: palette.inkFaint }}>当前没有失效的 Key。</Text> : null}
             </Group>
 
-            <Notice tone="muted">
-              体检只发一次轻量请求（模型列表 + 余额），不消耗对话额度。网络不可达时标「待体检」，不会谎报失效；预警与无效只静默归组，App 不会建议你删除任何 API。
-            </Notice>
           </>
         )}
       </ScrollView>

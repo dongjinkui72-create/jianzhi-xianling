@@ -107,6 +107,35 @@ export function describeFailure(res: RelayResponse, env: Envelope): string {
   return env.message || res.error || `HTTP ${res.status}`;
 }
 
+/* ------------------------------- 面板架构识别 ------------------------------- */
+
+export type RelayFamily = 'new-api' | 'one-api' | 'veloera' | 'unknown';
+
+/**
+ * 识别中转站面板架构。
+ * 国内绝大多数中转站都是 New API / One API / Veloera / Done-hub 这一系（接口同构），
+ * 这里用多个路由指纹逐个探测；都不命中时如实返回 unknown，不假装认识。
+ */
+export async function detectRelayFamily(t: Transport): Promise<{ family: RelayFamily; detail: string }> {
+  const st = await probeSite(t);
+  if (st.looksLikeNewApi) {
+    const ver = (st.version || '').toLowerCase();
+    const family: RelayFamily = ver.includes('veloera') ? 'veloera' : 'new-api';
+    return { family, detail: `${st.systemName || '站点'} · ${st.version || '版本未知'} · New API 系接口` };
+  }
+  const self = await t.request('/api/user/self');
+  if (self.status === 401 || self.status === 403) {
+    return { family: 'one-api', detail: '未登录但 /api/user/self 路由存在，按 One API 系处理' };
+  }
+  const tok = await t.request('/api/token/?p=1&page_size=1');
+  if (tok.status === 401 || tok.status === 403) {
+    return { family: 'one-api', detail: '/api/token 路由存在，按 One API 系处理' };
+  }
+  return {
+    family: 'unknown',
+    detail: st.reachable ? '未识别到已知面板接口；自动建档可能不可用，可手动粘贴' : '站点不可达，无法识别',
+  };
+}
 /* ------------------------------- 站点探测 ------------------------------- */
 
 export interface SiteInfo {

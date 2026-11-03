@@ -139,6 +139,12 @@ export async function getDb(): Promise<SQLite.SQLiteDatabase> {
       /* 列已存在则忽略 */
     }
   }
+  // 2.0：元信息表。升级安装时 SQLite 文件与 SecureStore 都保留，
+  // 这里只做「加列 / 建表」式迁移，绝不删改用户旧数据（中转站、密钥、设置、适配器）。
+  await db.execAsync('CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)');
+  await db.runAsync(
+    "INSERT INTO meta (k, v) VALUES ('schema_version', '2') ON CONFLICT(k) DO UPDATE SET v = excluded.v",
+  );
   instance = db;
   return db;
 }
@@ -155,6 +161,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   autoHealthCheck: true,
   lastRadarFetchAt: null,
   lastAdapterFetchAt: null,
+  announcementSeen: null,
 };
 
 export async function loadSettings(): Promise<AppSettings> {

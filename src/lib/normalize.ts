@@ -289,7 +289,8 @@ export function splitSentences(text: string): string[] {
  * 从任意网页文本里提炼「福利句」。
  * 只有同时满足：含福利词 + 含 api 或额度单位 + 未命中上下文噪声，才算候选。
  */
-export function extractBenefitLines(pageText: string, keyword = 'api'): string[] {
+export function extractBenefitLines(pageText: string, keyword: string | string[] = 'api'): string[] {
+  const kws = Array.isArray(keyword) ? keyword : [keyword];
   const sentences = splitSentences(htmlToText(pageText));
   const out: string[] = [];
   const seen = new Set<string>();
@@ -298,7 +299,7 @@ export function extractBenefitLines(pageText: string, keyword = 'api'): string[]
     if (!BENEFIT_HINT.test(s)) continue;
     const q = parseQuota(s);
     if (q.rejected) continue;
-    if (!hitKeyword(s, keyword) && q.kind === 'none') continue;
+    if (!kws.some((k) => hitKeyword(s, k)) && q.kind === 'none') continue;
     const key = s.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);

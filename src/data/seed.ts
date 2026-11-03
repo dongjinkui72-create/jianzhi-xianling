@@ -502,7 +502,7 @@ export function seedToBenefit(s: SeedBenefit, fetchedAt = Date.now()): Benefit {
     validUntil: s.validUntil,
     url: s.url,
     steps: s.steps,
-    keywords: s.keywords,
+    keywords: s.section === 'relay' ? Array.from(new Set([...s.keywords, 'api', '中转站'])) : s.keywords,
     sourceUrl: s.probeUrl,
     fetchedAt,
     confidence: q.rejected && s.confidence === 'verified' ? 'likely' : s.confidence,
