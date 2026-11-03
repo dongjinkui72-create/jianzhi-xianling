@@ -87,3 +87,7 @@ while ((m2 = re.exec(src))) {
 }
 assert.ok(checked >= 5, '应至少检查 5 条 INSERT，实际 ' + checked);
 console.log('✅ INSERT 列数/占位符静态检查通过（' + checked + ' 条）');
+// ---- relays upsert 实参必须包含新增两列 ----
+assert.ok(/relay\.apiBase, relay\.checkinMode,/.test(src), 'upsertRelay 实参缺少 apiBase/checkinMode');
+assert.ok(/runChecked\(db,/.test(src), 'INSERT 必须走 runChecked 受检入口');
+console.log('✅ upsertRelay 实参完整性检查通过');

@@ -12,6 +12,18 @@ import type { ApiKeyItem, ApiProtocol, AppSettings, Benefit, CapabilityState, Ch
  */
 
 const DB_NAME = 'jianzhi-xianling.db';
+
+/**
+ * 受检执行：占位符数与实参数不一致时立刻抛出带 SQL 片段的明确错误，
+ * 杜绝「值错位」这类沉默事故（历史上 relays 曾因漏传两列参数导致 NOT NULL 崩溃）。
+ */
+async function runChecked(db: SQLite.SQLiteDatabase, sql: string, params: any[]): Promise<void> {
+  const ph = (sql.match(/\?/g) || []).length;
+  if (ph !== params.length) {
+    throw new Error(`SQL 参数数不匹配：占位符 ${ph} 个 / 实参 ${params.length} 个 @ ${sql.slice(0, 60).replace(/\s+/g, ' ')}…`);
+  }
+  await db.runAsync(sql, ...params);
+}
 let instance: SQLite.SQLiteDatabase | null = null;
 
 export async function getDb(): Promise<SQLite.SQLiteDatabase> {
@@ -283,7 +295,7 @@ export async function listRelays(): Promise<Relay[]> {
 
 export async function upsertRelay(relay: Relay): Promise<void> {
   const db = await getDb();
-  await db.runAsync(
+  await runChecked(db,
     `INSERT INTO relays (id, name, base_url, kind, user_id, username, access_token_ref, credential_ref,
        has_session, api_base, checkin_mode, checkin_support, checkin_note, auto_key_support, auto_key_note,
        quota, used_quota, remaining_usd, remaining_tokens, last_sync_at, last_checkin_at, note, builtin, created_at)
@@ -297,12 +309,13 @@ export async function upsertRelay(relay: Relay): Promise<void> {
        quota=excluded.quota, used_quota=excluded.used_quota, remaining_usd=excluded.remaining_usd,
        remaining_tokens=excluded.remaining_tokens, last_sync_at=excluded.last_sync_at,
        last_checkin_at=excluded.last_checkin_at, note=excluded.note, builtin=excluded.builtin`,
-    relay.id, relay.name, relay.baseUrl, relay.kind, relay.userId, relay.username,
+    [relay.id, relay.name, relay.baseUrl, relay.kind, relay.userId, relay.username,
     relay.accessTokenRef, relay.credentialRef, relay.hasSession ? 1 : 0,
+    relay.apiBase, relay.checkinMode,
     relay.checkinSupport, relay.checkinSupportNote, relay.autoKeySupport, relay.autoKeyNote,
     relay.quota, relay.usedQuota, relay.remainingUsd, relay.remainingTokens,
     relay.lastSyncAt, relay.lastCheckinAt, relay.note, relay.builtin ? 1 : 0, relay.createdAt,
-  );
+  ]);
 }
 
 export async function deleteRelay(id: string): Promise<void> {
@@ -347,7 +360,7 @@ export async function listKeys(): Promise<ApiKeyItem[]> {
 
 export async function upsertKey(k: ApiKeyItem): Promise<void> {
   const db = await getDb();
-  await db.runAsync(
+  await runChecked(db,
     `INSERT INTO api_keys (id, relay_id, label, masked_key, base_url, provider, protocol, secret_ref,
        status, remaining_tokens, remaining_usd, status_note, checked_at, source, created_at)
      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
@@ -357,9 +370,9 @@ export async function upsertKey(k: ApiKeyItem): Promise<void> {
        secret_ref=excluded.secret_ref, status=excluded.status, remaining_tokens=excluded.remaining_tokens,
        remaining_usd=excluded.remaining_usd, status_note=excluded.status_note,
        checked_at=excluded.checked_at, source=excluded.source`,
-    k.id, k.relayId, k.label, k.maskedKey, k.baseUrl, k.provider, k.protocol, k.secretRef,
+    [k.id, k.relayId, k.label, k.maskedKey, k.baseUrl, k.provider, k.protocol, k.secretRef,
     k.status, k.remainingTokens, k.remainingUsd, k.statusNote, k.checkedAt, k.source, k.createdAt,
-  );
+  ]);
 }
 
 export async function deleteKey(id: string): Promise<void> {
@@ -371,9 +384,9 @@ export async function deleteKey(id: string): Promise<void> {
 
 export async function addCheckinLog(log: CheckinLog): Promise<void> {
   const db = await getDb();
-  await db.runAsync(
+  await runChecked(db,
     'INSERT INTO checkin_logs (id, relay_id, relay_name, at, result, message, gained_usd) VALUES (?,?,?,?,?,?,?)',
-    log.id, log.relayId, log.relayName, log.at, log.result, log.message, log.gainedUsd,
+    [log.id, log.relayId, log.relayName, log.at, log.result, log.message, log.gainedUsd],
   );
 }
 
@@ -446,14 +459,14 @@ export async function replaceBenefits(items: Benefit[]): Promise<void> {
   const db = await getDb();
   await db.runAsync('DELETE FROM benefits');
   for (const b of items) {
-    await db.runAsync(
+    await runChecked(db,
       `INSERT INTO benefits (id, section, provider, title, summary, quota_text, quota_tokens, quota_usd,
         valid_until, url, steps, keywords, source_url, fetched_at, confidence, origin, evidence)
        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      b.id, b.section, b.provider, b.title, b.summary, b.quotaText, b.quotaTokens, b.quotaUsd,
+      [b.id, b.section, b.provider, b.title, b.summary, b.quotaText, b.quotaTokens, b.quotaUsd,
       b.validUntil, b.url, JSON.stringify(b.steps), JSON.stringify(b.keywords), b.sourceUrl,
       b.fetchedAt, b.confidence, b.origin, b.evidence ?? null,
-    );
+    ]);
   }
 }
 
@@ -504,7 +517,7 @@ export async function listClients(): Promise<ChatClient[]> {
 
 export async function upsertClient(c: ChatClient): Promise<void> {
   const db = await getDb();
-  await db.runAsync(
+  await runChecked(db,
     `INSERT INTO clients (id, name, scheme, package_name, bundle_id, import_kind, import_template,
        settings_template, settings_base, launch_template, browser_based, note, source,
        platform, builtin, detected, detect_reason, added_at)
@@ -517,11 +530,11 @@ export async function upsertClient(c: ChatClient): Promise<void> {
        note=excluded.note, source=excluded.source,
        platform=excluded.platform, builtin=excluded.builtin, detected=excluded.detected,
        detect_reason=excluded.detect_reason`,
-    c.id, c.name, c.scheme, c.androidPackage, c.iosBundleId, c.importKind, c.importTemplate ?? null,
+    [c.id, c.name, c.scheme, c.androidPackage, c.iosBundleId, c.importKind, c.importTemplate ?? null,
     c.settingsTemplate ?? null, c.settingsBase ?? null, c.launchTemplate ?? null,
     c.browserBased ? 1 : 0, c.note ?? null, c.source || 'builtin',
     c.platform, c.builtin ? 1 : 0, c.detected, c.detectReason, c.addedAt,
-  );
+  ]);
 }
 
 export async function deleteClient(id: string): Promise<void> {
