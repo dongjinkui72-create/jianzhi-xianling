@@ -20,7 +20,8 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#F7FAFF"
       },
-      "permissions": []
+      "permissions": [],
+      "versionCode": 2
     },
     "ios": {
       "bundleIdentifier": "com.jianzhi.xianling",
