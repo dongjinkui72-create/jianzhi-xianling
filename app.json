@@ -22,7 +22,7 @@
       },
       "permissions": [],
       "softInputMode": "resize",
-      "versionCode": 3
+      "versionCode": 4
     },
     "ios": {
       "bundleIdentifier": "com.jianzhi.xianling",
