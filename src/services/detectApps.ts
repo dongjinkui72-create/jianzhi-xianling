@@ -142,9 +142,13 @@ export function reconcileWithInstalled(installed: { label: string; packageName: 
     if (knownPkgs.has(key)) continue;
     // 登记表里有同名适配器（如 TauriTavern / SillyTavern），把真实包名回填到它身上，
     // 这样启动时可以直接用包名拉起，而不是再建一条重复项。
-    const nameHit = clients.find(
-      (c) => !c.androidPackage && (strip(a.label).includes(strip(c.name)) || strip(c.name).includes(strip(a.label))),
-    );
+    const labelKey = strip(a.label);
+    const nameHit = labelKey.length >= 4
+      ? clients.find((c) => {
+          const n = strip(c.name);
+          return n.length >= 4 && (labelKey.includes(n) || n.includes(labelKey));
+        })
+      : undefined;
     if (nameHit) {
       if (nameHit.detected !== 'installed') {
         updates.push({

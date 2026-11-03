@@ -65,11 +65,15 @@ export function LaunchProvider({ children }: { children: React.ReactNode }) {
 
   const canLaunch =
     !!configuredClient &&
+    (configuredClient.detected === 'installed' || !!configuredClient.browserBased) &&
     !!selectedKey &&
     (selectedKey.status === 'ok' || selectedKey.status === 'unknown');
 
   const launchEnabledReason = useMemo(() => {
     if (!configuredClient) return '还没有配置 AI 聊天软件：先去「设置 → AI 聊天软件」选一个';
+    if (configuredClient.detected !== 'installed' && !configuredClient.browserBased) {
+      return '配置的软件当前不在手机上，请在设置里重新选择';
+    }
     if (!app.keys.length) return '可用池里还没有 API，先去「中转站」登录自动建档';
     if (!selectedKey) return '先在「可用池」里选中一条绿色可用的 API';
     if (!canLaunch) return '选中的 API 在预警区，请改选绿色可用的 API';

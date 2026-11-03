@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Linking, Platform, Pressable, ScrollView, Text, View } from 'react-native';
+import { Pressable, ScrollView, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Application from 'expo-application';
 import { Busy, Chip, Collapsible, Field, GlassButton, IconButton, KeyValue, Notice, Sheet, SwitchRow } from '../components/Bits';
@@ -39,9 +39,13 @@ export function SettingsScreen({ navigation }: any) {
   const theme = useThemeName();
 
   /** 只保留可导入的适配器 */
-  const importable = app.clients.filter((c) => canAutoImport(c));
-  const overlayApps = app.clients.filter((c) => !canAutoImport(c) && c.importKind !== 'launch_only' && c.detected === 'installed');
-  const preferred = importable.find((c) => c.id === app.settings.preferredClientId) ?? null;
+  // 只显示「本机实际识别到」的聊天软件；Chatbox / LobeChat 等固定条目不再常驻
+  const installedClients = app.clients.filter(
+    (c) => c.detected === 'installed' && c.importKind !== 'launch_only' && !c.browserBased,
+  );
+  const importable = installedClients.filter((c) => canAutoImport(c));
+  const overlayApps = installedClients.filter((c) => !canAutoImport(c));
+  const preferred = installedClients.find((c) => c.id === app.settings.preferredClientId) ?? null;
 
   const rescan = async () => {
     setScanning(true);
@@ -55,31 +59,11 @@ export function SettingsScreen({ navigation }: any) {
 
   const matches = useMemo(() => {
     const key = q.trim().toLowerCase();
-    if (!key) return { apps: [] as InstalledApp[], seeds: [] as typeof CHAT_APP_REGISTRY };
-    const apps = installed.filter((a) => a.label.toLowerCase().includes(key) || a.packageName.toLowerCase().includes(key));
-    const seeds = CHAT_APP_REGISTRY.filter(
-      (s) =>
-        (s.name.toLowerCase().includes(key) || (s.androidPackage ?? '').toLowerCase().includes(key)) &&
-        !app.clients.some((c) => c.id === s.id),
+    if (!key) return [] as InstalledApp[];
+    return installed.filter(
+      (a) => a.label.toLowerCase().includes(key) || a.packageName.toLowerCase().includes(key),
     );
-    return { apps, seeds };
-  }, [q, installed, app.clients]);
-
-  const addSeed = async (s: (typeof CHAT_APP_REGISTRY)[number]) => {
-    await app.addCustomClient({
-      name: s.name,
-      scheme: s.scheme ?? '',
-      importKind: s.importKind,
-      importTemplate: s.importTemplate,
-      settingsTemplate: s.settingsTemplate,
-      settingsBase: s.settingsBase,
-      launchTemplate: s.launchTemplate,
-      browserBased: s.browserBased,
-    });
-    setInstalledOpen(false);
-    setQ('');
-    setNote(canAutoImport(s) ? '已添加，导入方式由 App 自动识别。' : '已添加；它没有对外导入协议，启动时会用悬浮窗凭证层兜底。');
-  };
+  }, [q, installed]);
 
   const openInstalled = async () => {
     setInstalledOpen(true);
@@ -215,7 +199,6 @@ export function SettingsScreen({ navigation }: any) {
 
           <View style={{ flexDirection: 'row', gap: sc.s(8), marginBottom: sc.s(6), flexWrap: 'wrap' }}>
             <GlassButton label="从已安装应用添加" icon="phone-portrait-outline" size="sm" onPress={openInstalled} />
-            <GlassButton label="安装 Chatbox" icon="download-outline" size="sm" tone="ok" onPress={() => Linking.openURL('https://chatboxai.app/').catch(() => {})} />
           </View>
 
           <KeyValue k="当前默认" v={preferred ? preferred.name : '未配置（启动按钮保持灰色）'} />
@@ -260,8 +243,8 @@ export function SettingsScreen({ navigation }: any) {
                 ))}
               </View>
             ) : null}
-            {importable.length === 0 ? (
-              <Text style={{ fontSize: sc.fs(12), color: palette.inkFaint, paddingVertical: sc.s(10) }}>还没有可导入的软件。点「从已安装应用添加」，或先安装 Chatbox。</Text>
+            {installedClients.length === 0 ? (
+              <Text style={{ fontSize: sc.fs(12), color: palette.inkFaint, paddingVertical: sc.s(10) }}>本机还没有识别到可导入的 AI 聊天软件，点「从已安装应用添加」搜索。</Text>
             ) : null}
           </View>
         </Glass>
@@ -356,21 +339,7 @@ export function SettingsScreen({ navigation }: any) {
         {q.trim() && !installedBusy && !appListAvailable() ? (
           <Notice tone="warn" title="当前环境读不到已安装应用">读取应用列表需要原生模块；登记表搜索仍可用。</Notice>
         ) : null}
-        {matches.seeds.map((s) => (
-          <Glass key={s.id} onPress={() => addSeed(s)} style={{ marginBottom: sc.s(8) }} pad={sc.s(11)}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sc.s(9) }}>
-              <View style={{ width: sc.s(32), height: sc.s(32), borderRadius: sc.s(10), backgroundColor: canAutoImport(s) ? palette.okSoft : 'rgba(122,144,178,0.13)', alignItems: 'center', justifyContent: 'center' }}>
-                <Ionicons name={canAutoImport(s) ? 'flash' : 'layers-outline'} size={sc.s(16)} color={canAutoImport(s) ? palette.ok : palette.inkFaint} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text numberOfLines={1} style={{ fontSize: sc.fs(13.5), fontWeight: '700', color: palette.ink }}>{s.name}</Text>
-                <Text numberOfLines={1} style={{ fontSize: sc.fs(10), color: palette.inkFaint }}>登记表 · 自动识别导入方式</Text>
-              </View>
-              <Chip label={canAutoImport(s) ? '可全自动导入' : '悬浮窗兜底'} tone={canAutoImport(s) ? 'ok' : 'muted'} />
-            </View>
-          </Glass>
-        ))}
-        {matches.apps.map((a) => {
+        {matches.map((a) => {
           const matched = identify(a.packageName);
           const ok = !!matched && canAutoImport(matched);
           return (
@@ -388,7 +357,7 @@ export function SettingsScreen({ navigation }: any) {
             </Glass>
           );
         })}
-        {q.trim() && !installedBusy && matches.apps.length === 0 && matches.seeds.length === 0 ? (
+        {q.trim() && !installedBusy && matches.length === 0 ? (
           <Notice tone="warn">没搜到匹配的软件。换个名称或包名关键词再试一次。</Notice>
         ) : null}      </Sheet>
 
