@@ -168,7 +168,25 @@ export async function getDb(): Promise<SQLite.SQLiteDatabase> {
   await db.runAsync(
     "INSERT INTO meta (k, v) VALUES ('schema_version', '2') ON CONFLICT(k) DO UPDATE SET v = excluded.v",
   );
+  // 迁移后强校验：实测列必须与代码期望完全一致，否则抛出带表名/列名的明确错误，
+  // 绝不再让 schema 漂移沉默地留到 INSERT 时炸成天书。
+  const REQUIRED_COLUMNS: Record<string, string[]> = {
+    relays: ['id', 'name', 'base_url', 'kind', 'user_id', 'username', 'access_token_ref', 'credential_ref', 'has_session', 'api_base', 'checkin_mode', 'checkin_support', 'checkin_note', 'auto_key_support', 'auto_key_note', 'quota', 'used_quota', 'remaining_usd', 'remaining_tokens', 'last_sync_at', 'last_checkin_at', 'note', 'builtin', 'created_at'],
+    clients: ['id', 'name', 'scheme', 'package_name', 'bundle_id', 'import_kind', 'import_template', 'settings_template', 'settings_base', 'launch_template', 'browser_based', 'note', 'source', 'platform', 'builtin', 'detected', 'detect_reason', 'added_at'],
+    benefits: ['id', 'section', 'provider', 'title', 'summary', 'quota_text', 'quota_tokens', 'quota_usd', 'valid_until', 'url', 'steps', 'keywords', 'source_url', 'fetched_at', 'confidence', 'origin', 'evidence'],
+    api_keys: ['id', 'relay_id', 'label', 'masked_key', 'base_url', 'provider', 'protocol', 'secret_ref', 'status', 'remaining_tokens', 'remaining_usd', 'status_note', 'checked_at', 'source', 'created_at'],
+  };
+  for (const table of Object.keys(REQUIRED_COLUMNS)) {
+    const info = await db.getAllAsync<{ name: string }>(`PRAGMA table_info(${table})`);
+    const have = new Set(info.map((r) => r.name));
+    const missing = REQUIRED_COLUMNS[table].filter((col) => !have.has(col));
+    if (missing.length) {
+      throw new Error(`数据库迁移不完整：表 ${table} 缺列 ${missing.join(', ')}。请卸载重装或联系开发者（你的数据仍在本地文件中，不会被删除）`);
+    }
+  }
+
   instance = db;
+  return db;
   return db;
 }
 
@@ -267,7 +285,7 @@ export async function upsertRelay(relay: Relay): Promise<void> {
   const db = await getDb();
   await db.runAsync(
     `INSERT INTO relays (id, name, base_url, kind, user_id, username, access_token_ref, credential_ref,
-       has_session, checkin_support, checkin_note, auto_key_support, auto_key_note,
+       has_session, api_base, checkin_mode, checkin_support, checkin_note, auto_key_support, auto_key_note,
        quota, used_quota, remaining_usd, remaining_tokens, last_sync_at, last_checkin_at, note, builtin, created_at)
      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
      ON CONFLICT(id) DO UPDATE SET

@@ -71,3 +71,19 @@ const cols = db.prepare('PRAGMA table_info(relays)').all().map((r) => r.name);
 assert.strictEqual(cols.length, 24, '列数应为 24，实际 ' + cols.length);
 
 console.log('✅ 升级迁移仿真通过：22 列旧库 -> 24 列，旧数据保留，迁移幂等');
+// ---- 静态检查：db.ts 里每条 INSERT 的列数必须等于占位符数 ----
+const fs2 = require('fs');
+const path2 = require('path');
+const src = fs2.readFileSync(path2.join(__dirname, '..', 'src', 'data', 'db.ts'), 'utf8');
+const re = /INSERT INTO (\w+) \(([^)]*)\)\s*\n?\s*VALUES \(([^)]*)\)/g;
+let m2;
+let checked = 0;
+while ((m2 = re.exec(src))) {
+  const table = m2[1];
+  const cols = m2[2].split(',').map((s) => s.trim()).filter(Boolean).length;
+  const phs = m2[3].split(',').map((s) => s.trim()).filter(Boolean).length;
+  assert.strictEqual(cols, phs, table + ' 的 INSERT 列数(' + cols + ') != 占位符数(' + phs + ')');
+  checked++;
+}
+assert.ok(checked >= 5, '应至少检查 5 条 INSERT，实际 ' + checked);
+console.log('✅ INSERT 列数/占位符静态检查通过（' + checked + ' 条）');
