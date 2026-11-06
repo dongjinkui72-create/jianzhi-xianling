@@ -2,7 +2,7 @@
   "expo": {
     "name": "剪纸仙灵",
     "slug": "jianzhi-xianling",
-    "version": "2.0.9",
+    "version": "2.0.10",
     "scheme": "jianzhi",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -22,7 +22,7 @@
       },
       "permissions": [],
       "softInputMode": "resize",
-      "versionCode": 13
+      "versionCode": 14
     },
     "ios": {
       "bundleIdentifier": "com.jianzhi.xianling",
