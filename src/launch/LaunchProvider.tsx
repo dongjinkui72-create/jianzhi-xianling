@@ -4,8 +4,8 @@ import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import { Busy, Chip, GlassButton, Notice, Sheet } from '../components/Bits';
 import { Glass } from '../components/Glass';
-import { apiHostFor, canAutoImport, launchOnly, launchWithImport, type LaunchResult } from '../services/launcher';
-import { canOverlay, requestOverlay, showCredentialOverlay } from '../native/overlay';
+import { apiHostFor, buildLaunchUrl, canAutoImport, launchOnly, launchWithImport, type LaunchResult } from '../services/launcher';
+import { canOverlay, requestOverlay, showAndLaunchOverlay, showCredentialOverlay } from '../native/overlay';
 import { navigationRef } from '../navigation/navRef';
 import { useApp } from '../store/AppStore';
 import { HeadlessCheckinHost } from './HeadlessCheckinHost';
@@ -65,13 +65,13 @@ export function LaunchProvider({ children }: { children: React.ReactNode }) {
 
   const canLaunch =
     !!configuredClient &&
-    (configuredClient.detected === 'installed' || !!configuredClient.browserBased) &&
+    (configuredClient.detected !== 'not_installed' || !!configuredClient.browserBased || !!configuredClient.androidPackage) &&
     !!selectedKey &&
     (selectedKey.status === 'ok' || selectedKey.status === 'unknown');
 
   const launchEnabledReason = useMemo(() => {
     if (!configuredClient) return '还没有配置 AI 聊天软件：先去「设置 → AI 聊天软件」选一个';
-    if (configuredClient.detected !== 'installed' && !configuredClient.browserBased) {
+    if (configuredClient.detected === 'not_installed' && !configuredClient.browserBased && !configuredClient.androidPackage) {
       return '配置的软件当前不在手机上，请在设置里重新选择';
     }
     if (!app.keys.length) return '可用池里还没有 API，先去「中转站」登录自动建档';
@@ -113,77 +113,72 @@ export function LaunchProvider({ children }: { children: React.ReactNode }) {
         }
 
         const auto = canAutoImport(client);
-        // 不能自动导入的软件必须先有悬浮窗权限，否则无法把地址和密钥送到目标 App 上。
-        // 先在本 App 内提示授权，授权后会自动继续「打开 App 并显示悬浮窗」。
-        if (!auto && !(await canOverlay())) {
+
+        // 先走官方自动导入协议；成功就不需要悬浮窗。
+        if (auto) {
+          const imported = await launchWithImport(client, selectedKey, secret);
+          if (imported.ok) {
+            buzz();
+            setResult(imported);
+            setResultOpen(true);
+            return;
+          }
+        }
+
+        // 不能自动导入（或协议失败）：必须先把悬浮窗加到系统层，再打开目标 App。
+        // 这样对方切到前台时悬浮窗已经在了，不会因 JS 后台计时器被暂停而丢失。
+        const allowed = await canOverlay();
+        if (!allowed) {
+          const lo = await launchOnly(client);
           setPendingCred({ title: `${client.name} · 凭证`, base: apiHostFor(selectedKey), key: secret });
           setPendingClient(client);
           setOverlayPrompt(true);
+          setResult({
+            ok: lo.ok,
+            mode: lo.ok ? 'unconfirmed' : 'failed',
+            title: lo.ok ? `已拉起 ${client.name}` : lo.title,
+            message: lo.ok
+              ? '已打开目标 App。还需要一次悬浮窗权限：授权后会自动把调用地址与密钥送到 App 上方。'
+              : lo.message,
+            url: lo.url,
+            clientName: client.name,
+          });
+          setResultOpen(true);
           return;
         }
-        let res: LaunchResult;
 
-        if (auto) {
-          // 先走官方自动导入协议
-          res = await launchWithImport(client, selectedKey, secret);
-          if (!res.ok) {
-            // 协议失败也必须先把 App 打开，再改用悬浮窗
-            const lo = await launchOnly(client);
-            res = {
-              ...res,
-              ok: lo.ok,
-              mode: lo.ok ? 'launch_only' : 'failed',
-              title: lo.ok ? `已拉起 ${client.name}` : `${client.name} 未能拉起`,
-              message: lo.ok ? '自动导入协议没有成功，已打开 App；调用地址与密钥改用悬浮窗送达。' : lo.message,
-              url: lo.url,
-            };
-          }
+        const ov = await showAndLaunchOverlay(
+          client.androidPackage,
+          buildLaunchUrl(client) || '',
+          `${client.name} · 凭证`,
+          apiHostFor(selectedKey),
+          secret,
+        );
+
+        let res: LaunchResult;
+        if (ov.launched) {
+          res = {
+            ok: true,
+            mode: 'unconfirmed',
+            title: `已拉起 ${client.name}`,
+            message: ov.shown
+              ? `${client.name} 不接受自动写入密钥，已打开 App 并把凭证悬浮窗放在它上面。点小圆钮展开地址与密钥，点复制即可；长按圆钮关闭。`
+              : `已拉起 ${client.name}，但系统悬浮窗没有显示成功。请回到设置里重新授予悬浮窗权限。`,
+            clientName: client.name,
+          };
         } else {
-          // 没有自动导入协议：直接拉起，再用悬浮窗送达
+          // 悬浮窗已经在，但包名启动失败：再按名称/应用商店兜底，不让用户停在原地。
           const lo = await launchOnly(client);
           res = {
             ok: lo.ok,
             mode: lo.ok ? 'unconfirmed' : 'failed',
             title: lo.ok ? `已拉起 ${client.name}` : lo.title,
             message: lo.ok
-              ? `${client.name} 不能自动写入密钥，已打开 App；调用地址与密钥通过悬浮窗送达，点开小圆钮复制即可。`
-              : lo.message,
+              ? `${client.name} 已打开，凭证悬浮窗已在屏幕上。`
+              : `${lo.message}${ov.shown ? ' 凭证悬浮窗已开启，但目标 App 没有启动。' : ''}`,
             url: lo.url,
             clientName: client.name,
           };
-        }
-
-        // 仍然没打开：重新扫描已安装应用后再试一次，绝不原地卡住
-        if (!res.ok) {
-          await app.rescanClients();
-          const lo2 = await launchOnly(client);
-          if (lo2.ok) {
-            res = {
-              ...lo2,
-              mode: auto ? 'launch_only' : 'unconfirmed',
-              title: `已拉起 ${client.name}`,
-              message: auto
-                ? `已打开 ${client.name}，自动导入没有成功，地址与密钥改用悬浮窗送达。`
-                : `${client.name} 不能自动写入密钥，已打开 App；地址与密钥通过悬浮窗送达。`,
-            };
-          }
-        }
-
-        // 需要悬浮窗：自动导入失败，或软件本身没有导入协议
-        const needOverlay = res.ok && !(res.mode === 'auto_import' || res.mode === 'url_import');
-        if (needOverlay) {
-          // 等目标 App 到前台后再盖悬浮窗，避免盖在我们自己界面上
-          await new Promise((r) => setTimeout(r, 800));
-          const allowed = await canOverlay();
-          if (allowed) {
-            const shown = await showCredentialOverlay(`${client.name} · 凭证`, apiHostFor(selectedKey), secret);
-            if (shown) {
-              res = { ...res, message: `${res.message} 悬浮窗已开启：点小圆钮显示地址与密钥（可复制），再点收起，长按关闭。` };
-            }
-          } else {
-            setPendingCred({ title: `${client.name} · 凭证`, base: apiHostFor(selectedKey), key: secret });
-            setOverlayPrompt(true);
-          }
         }
 
         buzz();

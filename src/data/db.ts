@@ -45,6 +45,7 @@ export async function getDb(): Promise<SQLite.SQLiteDatabase> {
       has_session INTEGER NOT NULL DEFAULT 0,
       api_base TEXT,
       checkin_mode TEXT,
+      checkin_path TEXT,
       checkin_support TEXT NOT NULL DEFAULT 'unknown',
       checkin_note TEXT,
       auto_key_support TEXT NOT NULL DEFAULT 'unknown',
@@ -53,6 +54,8 @@ export async function getDb(): Promise<SQLite.SQLiteDatabase> {
       used_quota REAL,
       remaining_usd REAL,
       remaining_tokens REAL,
+      balance_label TEXT,
+      balance_text TEXT,
       last_sync_at INTEGER,
       last_checkin_at INTEGER,
       note TEXT,
@@ -145,6 +148,9 @@ export async function getDb(): Promise<SQLite.SQLiteDatabase> {
     relays: [
       ['api_base', 'TEXT'],
       ['checkin_mode', 'TEXT'],
+      ['checkin_path', 'TEXT'],
+      ['balance_label', 'TEXT'],
+      ['balance_text', 'TEXT'],
     ],
     clients: [
       ['settings_template', 'TEXT'],
@@ -183,7 +189,7 @@ export async function getDb(): Promise<SQLite.SQLiteDatabase> {
   // 迁移后强校验：实测列必须与代码期望完全一致，否则抛出带表名/列名的明确错误，
   // 绝不再让 schema 漂移沉默地留到 INSERT 时炸成天书。
   const REQUIRED_COLUMNS: Record<string, string[]> = {
-    relays: ['id', 'name', 'base_url', 'kind', 'user_id', 'username', 'access_token_ref', 'credential_ref', 'has_session', 'api_base', 'checkin_mode', 'checkin_support', 'checkin_note', 'auto_key_support', 'auto_key_note', 'quota', 'used_quota', 'remaining_usd', 'remaining_tokens', 'last_sync_at', 'last_checkin_at', 'note', 'builtin', 'created_at'],
+    relays: ['id', 'name', 'base_url', 'kind', 'user_id', 'username', 'access_token_ref', 'credential_ref', 'has_session', 'api_base', 'checkin_mode', 'checkin_path', 'checkin_support', 'checkin_note', 'auto_key_support', 'auto_key_note', 'quota', 'used_quota', 'remaining_usd', 'remaining_tokens', 'balance_label', 'balance_text', 'last_sync_at', 'last_checkin_at', 'note', 'builtin', 'created_at'],
     clients: ['id', 'name', 'scheme', 'package_name', 'bundle_id', 'import_kind', 'import_template', 'settings_template', 'settings_base', 'launch_template', 'browser_based', 'note', 'source', 'platform', 'builtin', 'detected', 'detect_reason', 'added_at'],
     benefits: ['id', 'section', 'provider', 'title', 'summary', 'quota_text', 'quota_tokens', 'quota_usd', 'valid_until', 'url', 'steps', 'keywords', 'source_url', 'fetched_at', 'confidence', 'origin', 'evidence'],
     api_keys: ['id', 'relay_id', 'label', 'masked_key', 'base_url', 'provider', 'protocol', 'secret_ref', 'status', 'remaining_tokens', 'remaining_usd', 'status_note', 'checked_at', 'source', 'created_at'],
@@ -252,10 +258,11 @@ export async function saveSettings(patch: Partial<AppSettings>): Promise<AppSett
 interface RelayRow {
   id: string; name: string; base_url: string; kind: string; user_id: number | null;
   username: string | null; access_token_ref: string | null; credential_ref: string | null;
-  has_session: number; api_base: string | null; checkin_mode: string | null; checkin_support: string; checkin_note: string | null;
+  has_session: number; api_base: string | null; checkin_mode: string | null; checkin_path: string | null; checkin_support: string; checkin_note: string | null;
   auto_key_support: string; auto_key_note: string | null;
   quota: number | null; used_quota: number | null; remaining_usd: number | null;
-  remaining_tokens: number | null; last_sync_at: number | null; last_checkin_at: number | null;
+  remaining_tokens: number | null; balance_label: string | null; balance_text: string | null;
+  last_sync_at: number | null; last_checkin_at: number | null;
   note: string | null; builtin: number; created_at: number;
 }
 
@@ -272,6 +279,7 @@ function rowToRelay(r: RelayRow): Relay {
     hasSession: !!r.has_session,
     apiBase: r.api_base ?? null,
     checkinMode: (r.checkin_mode as Relay['checkinMode']) ?? null,
+    checkinPath: r.checkin_path ?? null,
     checkinSupport: (r.checkin_support as CapabilityState) || 'unknown',
     checkinSupportNote: r.checkin_note,
     autoKeySupport: (r.auto_key_support as CapabilityState) || 'unknown',
@@ -280,6 +288,8 @@ function rowToRelay(r: RelayRow): Relay {
     usedQuota: r.used_quota,
     remainingUsd: r.remaining_usd,
     remainingTokens: r.remaining_tokens,
+    balanceLabel: r.balance_label ?? null,
+    balanceText: r.balance_text ?? null,
     lastSyncAt: r.last_sync_at,
     lastCheckinAt: r.last_checkin_at,
     note: r.note,
@@ -298,24 +308,27 @@ export async function upsertRelay(relay: Relay): Promise<void> {
   const db = await getDb();
   await runChecked(db,
     `INSERT INTO relays (id, name, base_url, kind, user_id, username, access_token_ref, credential_ref,
-       has_session, api_base, checkin_mode, checkin_support, checkin_note, auto_key_support, auto_key_note,
-       quota, used_quota, remaining_usd, remaining_tokens, last_sync_at, last_checkin_at, note, builtin, created_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+       has_session, api_base, checkin_mode, checkin_path, checkin_support, checkin_note, auto_key_support, auto_key_note,
+       quota, used_quota, remaining_usd, remaining_tokens, balance_label, balance_text,
+       last_sync_at, last_checkin_at, note, builtin, created_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
      ON CONFLICT(id) DO UPDATE SET
        name=excluded.name, base_url=excluded.base_url, kind=excluded.kind, user_id=excluded.user_id,
        username=excluded.username, access_token_ref=excluded.access_token_ref, credential_ref=excluded.credential_ref,
        has_session=excluded.has_session, api_base=excluded.api_base, checkin_mode=excluded.checkin_mode,
+       checkin_path=excluded.checkin_path,
        checkin_support=excluded.checkin_support, checkin_note=excluded.checkin_note,
        auto_key_support=excluded.auto_key_support, auto_key_note=excluded.auto_key_note,
        quota=excluded.quota, used_quota=excluded.used_quota, remaining_usd=excluded.remaining_usd,
-       remaining_tokens=excluded.remaining_tokens, last_sync_at=excluded.last_sync_at,
+       remaining_tokens=excluded.remaining_tokens, balance_label=excluded.balance_label,
+       balance_text=excluded.balance_text, last_sync_at=excluded.last_sync_at,
        last_checkin_at=excluded.last_checkin_at, note=excluded.note, builtin=excluded.builtin`,
     [relay.id, relay.name, relay.baseUrl, relay.kind, relay.userId, relay.username,
     relay.accessTokenRef, relay.credentialRef, relay.hasSession ? 1 : 0,
-    relay.apiBase, relay.checkinMode,
+    relay.apiBase, relay.checkinMode, relay.checkinPath,
     relay.checkinSupport, relay.checkinSupportNote, relay.autoKeySupport, relay.autoKeyNote,
     relay.quota, relay.usedQuota, relay.remainingUsd, relay.remainingTokens,
-    relay.lastSyncAt, relay.lastCheckinAt, relay.note, relay.builtin ? 1 : 0, relay.createdAt,
+    relay.balanceLabel, relay.balanceText, relay.lastSyncAt, relay.lastCheckinAt, relay.note, relay.builtin ? 1 : 0, relay.createdAt,
   ]);
 }
 

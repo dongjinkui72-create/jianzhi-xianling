@@ -6,6 +6,7 @@ import {
   domHasCheckinButton,
   fetchCheckinSupport,
   fetchSelf,
+  readBalanceDisplay,
   readLocalUserId,
   type SelfInfo,
 } from './relayApi';
@@ -44,7 +45,7 @@ export function headlessReady(): boolean {
   return !!navigator;
 }
 
-function waitLoad(timeoutMs = 18000): Promise<boolean> {
+function waitLoad(timeoutMs = 12000): Promise<boolean> {
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
       if (loadResolve) loadResolve = null;
@@ -75,7 +76,10 @@ export interface HeadlessProbe {
   self: SelfInfo | null;
   checkinSupport: CapabilityState;
   checkinMode: 'api' | 'dom' | null;
+  checkinPath?: string | null;
   note: string | null;
+  balanceLabel?: string | null;
+  balanceText?: string | null;
 }
 
 /**
@@ -89,12 +93,14 @@ async function probeAt(relay: Relay, pageUrl: string): Promise<HeadlessProbe> {
   navigator!(pageUrl);
   await waitLoad();
   // SPA 首屏请求可能晚于 onLoadEnd，稍等一下再读探针
-  await sleep(1200);
+  await sleep(600);
 
   const uid = await readLocalUserId(headlessBridge);
   if (uid) headlessBridge.setUserId(uid);
 
   const hints = await headlessBridge.collectApiHints();
+  // 即使读不到账号接口，也要先把页面上显示的余额读下来（很多自建站只有页面余额）。
+  let domBalance = await readBalanceDisplay(headlessBridge);
   const cands: string[] = [];
   const push = (u: string | null | undefined) => {
     if (!u) return;
@@ -135,18 +141,24 @@ async function probeAt(relay: Relay, pageUrl: string): Promise<HeadlessProbe> {
     // 只要能确认页面上的签到入口，就允许后续用网页按钮签到。
     const dom = await domHasCheckinButton(headlessBridge);
     if (dom.found) {
-      return { pageUrl, session: false, apiBase: null, self: null, checkinSupport: 'unknown', checkinMode: 'dom', note: dom.message };
+      return { pageUrl, session: false, apiBase: null, self: null, checkinSupport: 'unknown', checkinMode: 'dom', checkinPath: null, note: dom.message, balanceLabel: domBalance?.label ?? null, balanceText: domBalance?.text ?? null };
     }
-    return { pageUrl, session: false, apiBase: null, self: null, checkinSupport: 'unknown', checkinMode: null, note: '后台读不到登录态（Cookie 可能已失效）' };
+    return { pageUrl, session: false, apiBase: null, self: null, checkinSupport: 'unknown', checkinMode: null, checkinPath: null, note: '后台读不到登录态（Cookie 可能已失效）', balanceLabel: domBalance?.label ?? null, balanceText: domBalance?.text ?? null };
   }
 
+  const balance = domBalance || await readBalanceDisplay(headlessBridge);
+  const fallbackBalanceText = self.balanceAmount != null ? `${self.balanceAmount} ${self.balanceLabel || '代币'}` : null;
+  // 自定义站点已知签到接口（如 77625 的 /api/account/checkin），不再用 GET 误判。
+  if (self.checkinPath) {
+    return { pageUrl, session: true, apiBase, self, checkinSupport: 'yes', checkinMode: 'api', checkinPath: self.checkinPath, note: null, balanceLabel: self.balanceLabel ?? balance?.label ?? null, balanceText: fallbackBalanceText ?? balance?.text ?? null };
+  }
   const support = await fetchCheckinSupport(headlessBridge);
   if (support.support === 'yes') {
-    return { pageUrl, session: true, apiBase, self, checkinSupport: 'yes', checkinMode: 'api', note: null };
+    return { pageUrl, session: true, apiBase, self, checkinSupport: 'yes', checkinMode: 'api', checkinPath: support.path ?? null, note: null, balanceLabel: self.balanceLabel ?? balance?.label ?? null, balanceText: fallbackBalanceText ?? balance?.text ?? null };
   }
   const dom = await domHasCheckinButton(headlessBridge);
   if (dom.found) {
-    return { pageUrl, session: true, apiBase, self, checkinSupport: 'yes', checkinMode: 'dom', note: dom.message };
+    return { pageUrl, session: true, apiBase, self, checkinSupport: 'yes', checkinMode: 'dom', checkinPath: null, note: dom.message, balanceLabel: self.balanceLabel ?? balance?.label ?? null, balanceText: fallbackBalanceText ?? balance?.text ?? null };
   }
   const explicitNo = support.support === 'no' && /未开启|未启用|已关闭|not enabled/i.test(support.reason || '');
   return {
@@ -157,7 +169,10 @@ async function probeAt(relay: Relay, pageUrl: string): Promise<HeadlessProbe> {
     // 只是接口 404、页面按钮又没抓到时，不能断言「不支持」，只能说「无法确认」
     checkinSupport: explicitNo ? 'no' : 'unknown',
     checkinMode: null,
+    checkinPath: null,
     note: support.reason || dom.message || null,
+    balanceLabel: self.balanceLabel ?? balance?.label ?? null,
+    balanceText: fallbackBalanceText ?? balance?.text ?? null,
   };
 }
 
@@ -244,6 +259,19 @@ export async function headlessCheckin(relay: Relay): Promise<HeadlessCheckinResu
   }
   busy = true;
   try {
+    // 已知是网页按钮签到的站点：只打开上次成功的页面，不再重复探测多个路由。
+    if (relay.checkinMode === 'dom' && /^https?:/i.test(relay.baseUrl)) {
+      navigator!(relay.baseUrl);
+      await waitLoad();
+      await sleep(350);
+      const dom = await domCheckin(headlessBridge);
+      return {
+        ok: dom.ok,
+        outcome: dom.ok ? 'success' : 'unconfirmed',
+        message: dom.message,
+        mode: 'dom',
+      };
+    }
     const probe = await probeLocked(relay);
     if (!probe.session && !probe.checkinMode) {
       return {
@@ -256,7 +284,7 @@ export async function headlessCheckin(relay: Relay): Promise<HeadlessCheckinResu
     }
 
     if (probe.checkinMode === 'api') {
-      const r = await doCheckin(headlessBridge);
+      const r = await doCheckin(headlessBridge, { assumeApi: !!probe.checkinPath, path: probe.checkinPath });
       return {
         ok: r.outcome === 'success',
         outcome: r.outcome,

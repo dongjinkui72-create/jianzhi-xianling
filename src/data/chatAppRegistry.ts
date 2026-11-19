@@ -225,12 +225,12 @@ export const CHAT_APP_REGISTRY: Seed[] = [
   {
     id: 'tauritavern',
     name: 'TauriTavern（tauritavern）',
-    scheme: 'tauritavern',
-    androidPackage: null,
+    scheme: null,
+    androidPackage: 'com.tauritavern.client',
     iosBundleId: null,
     importKind: 'unconfirmed',
     platform: 'all',
-    note: 'Tauri 桌面客户端，无对外导入协议；启动后由悬浮窗凭证层兜底',
+    note: '安卓版包名 com.tauritavern.client；没有对外写入密钥的协议，启动后由悬浮窗凭证层兜底',
   },
   {
     id: 'risuai',

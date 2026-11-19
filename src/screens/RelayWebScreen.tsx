@@ -11,7 +11,7 @@ import { useScale } from '../theme/useScale';
 import { useKeyboardHeight } from '../theme/useKeyboard';
 import { useApp } from '../store/AppStore';
 import { RelayBridge, SPY_JS } from '../services/relayBridge';
-import { deriveApiCandidates, detectRelayFamily, domCheckin, domHasCheckinButton, fetchCheckinSupport, fetchSelf, joinApiBase, readLocalUserId, type SelfInfo } from '../services/relayApi';
+import { deriveApiCandidates, detectRelayFamily, domCheckin, domHasCheckinButton, fetchCheckinSupport, fetchSelf, joinApiBase, readBalanceDisplay, readLocalUserId, type SelfInfo } from '../services/relayApi';
 import { quotaToUsd, usdToTokensEstimate } from '../lib/format';
 import type { Relay } from '../lib/types';
 
@@ -100,6 +100,12 @@ export function RelayWebScreen({ route, navigation }: any) {
   /** 签到能力探测：接口优先，网页按钮兜底 */
   const probeCheckin = useCallback(
     async (relay: Relay) => {
+      const me = await fetchSelf(bridge);
+      if (me.ok && me.self?.checkinPath) {
+        const next = { ...relay, checkinSupport: 'yes' as const, checkinMode: 'api' as const, checkinPath: me.self.checkinPath, checkinSupportNote: null };
+        await app.updateRelay(next);
+        return { mode: 'api' as const, note: null as string | null };
+      }
       const support = await fetchCheckinSupport(bridge);
       if (support.support === 'yes') {
         const next = { ...relay, checkinSupport: 'yes' as const, checkinMode: 'api' as const, checkinSupportNote: null };
@@ -158,6 +164,8 @@ export function RelayWebScreen({ route, navigation }: any) {
           typeof here === 'string' && /^https?:/i.test(here) && siteKeyOf(here) === siteKeyOf(relay0.baseUrl)
             ? normalizeUrl(here)
             : relay0.baseUrl;
+        const balance = await readBalanceDisplay(bridge).catch(() => null);
+        const usd = quotaToUsd(self.quota);
         const relay: Relay = {
           ...relay0,
           baseUrl: hereUrl,
@@ -166,6 +174,14 @@ export function RelayWebScreen({ route, navigation }: any) {
           kind: fam.family === 'unknown' ? relay0.kind : fam.family,
           userId: self.id,
           username: self.username,
+          quota: self.quota ?? relay0.quota,
+          usedQuota: self.usedQuota ?? relay0.usedQuota,
+          remainingUsd: usd ?? relay0.remainingUsd,
+          remainingTokens: usd != null ? usdToTokensEstimate(usd) : relay0.remainingTokens,
+          balanceLabel: balance?.label ?? relay0.balanceLabel,
+          balanceText: balance?.text ?? relay0.balanceText,
+          checkinPath: self.checkinPath ?? relay0.checkinPath,
+          lastSyncAt: Date.now(),
         };
         await app.updateRelay(relay);
         relayRef.current = relay;
@@ -259,6 +275,7 @@ export function RelayWebScreen({ route, navigation }: any) {
         const d = await discover();
         if (d.self) {
           const usd = quotaToUsd(d.self.quota);
+          const balance = await readBalanceDisplay(bridge).catch(() => null);
           next = {
             ...next,
             hasSession: true,
@@ -269,6 +286,8 @@ export function RelayWebScreen({ route, navigation }: any) {
             usedQuota: d.self.usedQuota,
             remainingUsd: usd,
             remainingTokens: usdToTokensEstimate(usd),
+            balanceLabel: balance?.label ?? next.balanceLabel,
+            balanceText: balance?.text ?? next.balanceText,
             lastSyncAt: Date.now(),
           };
           const support = await fetchCheckinSupport(bridge);

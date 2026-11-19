@@ -103,6 +103,19 @@ function num(v: any): number | null {
   return typeof n === 'number' && isFinite(n) ? n : null;
 }
 
+/** 公开面板常把余额写成 "1,234" / "1.2万" / "3.5K"，统一转成数字。 */
+function amount(v: any): number | null {
+  if (typeof v === 'number') return isFinite(v) ? v : null;
+  if (typeof v !== 'string') return null;
+  const m = v.replace(/,/g, '').trim().match(/^(-?\d+(?:\.\d+)?)\s*(万|亿|[kKmM])?$/);
+  if (!m) return null;
+  const base = Number(m[1]);
+  if (!isFinite(base)) return null;
+  const unit = (m[2] || '').toLowerCase();
+  const mul = unit === '万' ? 1e4 : unit === '亿' ? 1e8 : unit === 'k' ? 1e3 : unit === 'm' ? 1e6 : 1;
+  return base * mul;
+}
+
 export function describeFailure(res: RelayResponse, env: Envelope): string {
   if (res.status === 401 || res.status === 403) return `登录态无效或已过期（HTTP ${res.status}）`;
   if (res.status === 404) return '接口不存在（HTTP 404），该站点可能不是 New API / One API 架构';
@@ -174,6 +187,56 @@ export interface SelfInfo {
   usedQuota: number | null;
   requestCount: number | null;
   group: string | null;
+  /** 自定义中转站的余额数值（如 credits / points / 饼干） */
+  balanceAmount: number | null;
+  /** 自定义余额单位（如 积分 / 饼干 / tokens） */
+  balanceLabel: string | null;
+  /** 自定义站点的签到接口路径 */
+  checkinPath: string | null;
+}
+
+function firstNum(d: any, keys: string[]): { value: number; key: string } | null {
+  for (const key of keys) {
+    const v = amount(d?.[key]);
+    if (v != null) return { value: v, key };
+  }
+  return null;
+}
+
+function genericBalance(d: any): { amount: number; label: string } | null {
+  const hit = firstNum(d, ['credits', 'points', 'balance', 'balance_amount', 'available', 'available_balance', 'score', 'coins', 'coin', 'cookies', 'cookie', 'tokens', 'remain_quota', 'remaining_quota', 'remain', 'user_quota']);
+  if (!hit) return null;
+  const label =
+    hit.key === 'credits' || hit.key === 'points' || hit.key === 'score' ? '积分'
+      : hit.key === 'coins' || hit.key === 'coin' ? '金币'
+        : hit.key === 'tokens' ? 'tokens'
+          : hit.key === 'balance' || hit.key === 'balance_amount' ? '代币'
+            : '站点代币';
+  return { amount: hit.value, label };
+}
+
+export function parseGenericAccount(raw: any): SelfInfo | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const d = raw.user || raw.account || raw.profile || raw.result || raw.data || raw;
+  const balance = genericBalance(d);
+  const username = d.username ?? d.display_name ?? d.name ?? d.email ?? d.nickname ?? null;
+  const id = num(d.id ?? d.user_id ?? d.uid);
+  if (!balance && !username && id == null) return null;
+  const explicitCheckin = typeof d.checkin_path === 'string' ? d.checkin_path : typeof d.checkin_url === 'string' ? d.checkin_url : null;
+  const customCheckin = explicitCheckin || (balance && (d.checkin_points != null || d.credits != null || d.checked_in_today != null))
+    ? (explicitCheckin || '/api/account/checkin')
+    : null;
+  return {
+    id: id != null ? Number(id) : 0,
+    username: typeof username === 'string' ? username : null,
+    quota: amount(d.quota),
+    usedQuota: amount(d.used_quota),
+    requestCount: num(d.request_count),
+    group: d.group ?? d.role ?? null,
+    balanceAmount: balance?.amount ?? null,
+    balanceLabel: balance?.label ?? null,
+    checkinPath: customCheckin,
+  };
 }
 
 export async function fetchSelf(t: Transport): Promise<{ ok: boolean; self?: SelfInfo; reason?: string }> {
@@ -193,20 +256,100 @@ export async function fetchSelf(t: Transport): Promise<{ ok: boolean; self?: Sel
     }
   }
   if (!env.success || !env.data || env.data.id == null) {
+    // 非 New API 的自建站（如 77625）：读 /api/auth/me 这类自定义账号接口。
+    for (const path of ['/api/auth/me', '/api/account/me', '/api/account', '/api/account/info', '/api/user/me', '/api/user/current', '/api/profile', '/api/me']) {
+      const r2 = await t.request(path, { timeoutMs: 8000 });
+      if (!r2.ok) continue;
+      const e2 = envelope(r2);
+      const self = parseGenericAccount(e2.data);
+      if (self) return { ok: true, self };
+    }
     return { ok: false, reason: describeFailure(res, env) };
   }
   const d = env.data;
-  return {
-    ok: true,
-    self: {
-      id: Number(d.id),
-      username: d.username ?? d.display_name ?? null,
-      quota: num(d.quota),
-      usedQuota: num(d.used_quota),
-      requestCount: num(d.request_count),
-      group: d.group ?? null,
-    },
+  const ownBalance = genericBalance(d);
+  const customCheckin = ownBalance && (d.checkin_points != null || d.credits != null || d.checked_in_today != null)
+    ? '/api/account/checkin'
+    : null;
+  const self: SelfInfo = {
+    id: Number(d.id),
+    username: d.username ?? d.display_name ?? null,
+    quota: amount(d.quota),
+    usedQuota: amount(d.used_quota),
+    requestCount: num(d.request_count),
+    group: d.group ?? null,
+    balanceAmount: ownBalance?.amount ?? null,
+    balanceLabel: ownBalance?.label ?? null,
+    checkinPath: customCheckin,
   };
+  // 很多中转站模仿 New API 返回 id/username，但余额只在自定义接口里。
+  return { ok: true, self: await enrichSelfWithGeneric(t, self) };
+}
+
+/** New API 用户接口成功时，再补读自定义站的余额字段（如 77625 的 /api/auth/me -> credits）。 */
+async function enrichSelfWithGeneric(t: Transport, self: SelfInfo): Promise<SelfInfo> {
+  if (self.balanceAmount != null && self.checkinPath) return self;
+  const paths = ['/api/auth/me', '/api/account/me', '/api/account/info'];
+  for (const path of paths) {
+    const r = await t.request(path, { timeoutMs: 6000 });
+    if (!r.ok) continue;
+    const g = parseGenericAccount(envelope(r).data);
+    if (!g) continue;
+    return {
+      ...self,
+      balanceAmount: self.balanceAmount ?? g.balanceAmount,
+      balanceLabel: self.balanceLabel ?? g.balanceLabel,
+      checkinPath: self.checkinPath ?? g.checkinPath,
+    };
+  }
+  return self;
+}
+
+/** 从页面上读取站点自己的代币名称与余额文案（如“饼干”“积分”“token”），读不到就返回 null。 */
+export async function readBalanceDisplay(t: Transport): Promise<{ label: string; text: string } | null> {
+  if (!t.eval) return null;
+  const res = await t.eval(
+    `(function(){
+      try {
+        var parse = function(raw){
+          var line = String(raw || '').replace(/\s+/g, ' ').trim();
+          if (!line || line.length > 120) return null;
+          if (/(已用|消耗|充值|获得|奖励|签到|套餐|价格)/.test(line) && !/(余额|剩余|可用|当前)/.test(line)) return null;
+          var a = line.match(/([0-9][0-9,.]*(?:\s*[万亿kKmM])?)\s*(饼干|代币|积分|点券|金币|硬币|tokens?|credits?|coins?)/i);
+          if (a) {
+            var u = a[2];
+            var label = /^credits?$/i.test(u) ? '积分' : (/^coins?$/i.test(u) ? '金币' : u);
+            return { label: label, text: a[1] + ' ' + label };
+          }
+          var b = line.match(/(余额|剩余|当前余额|可用余额|可用额度|额度|积分|代币|饼干|token|credit|coin|point)\s*[:：]?\s*([0-9][0-9,.]*(?:\s*[万亿kKmM])?)/i);
+          if (b) {
+            var key = b[1];
+            var lab = /(余额|剩余|额度)/.test(key) ? '代币' : key;
+            return { label: lab, text: b[2] + ' ' + lab };
+          }
+          return null;
+        };
+        // 1) 优先读明确标记为 credit / balance / quota 的元素
+        var nodes = document.querySelectorAll('[id*="credit" i],[class*="credit" i],[id*="balance" i],[class*="balance" i],[id*="quota" i],[class*="quota" i],[id*="coin" i],[class*="coin" i],[id*="point" i],[class*="point" i]');
+        for (var i = 0; i < nodes.length; i++) {
+          var hit = parse(nodes[i].textContent || '');
+          if (hit) return hit;
+        }
+        // 2) 再从页面文本逐行找“余额 / 剩余 / 123 积分”
+        var text = (document.body && document.body.innerText) || '';
+        var lines = text.split('\n');
+        for (var j = 0; j < lines.length; j++) {
+          var v = parse(lines[j]);
+          if (v) return v;
+        }
+        return null;
+      } catch(e) { return null; }
+    })()`,
+    6000,
+  );
+  if (!res || typeof res !== 'object' || typeof res.text !== 'string') return null;
+  const label = typeof res.label === 'string' && res.label ? res.label : '代币';
+  return { label, text: String(res.text).slice(0, 40) };
 }
 
 /** 从探针记录 + 页面 origin 推导候选 API 根地址（按可能性排序） */
@@ -395,8 +538,17 @@ export interface CheckinResult {
 /**
  * 执行签到。红线：不支持自动签到的站点必须如实说明只能手动，绝不伪造成功。
  */
-export async function doCheckin(t: Transport): Promise<CheckinResult> {
-  const support = await fetchCheckinSupport(t);
+export async function doCheckin(
+  t: Transport,
+  opts?: { assumeApi?: boolean; path?: string | null },
+): Promise<CheckinResult> {
+  let support: CheckinSupport;
+  if (opts?.assumeApi) {
+    // 已知该站是接口签到：先直接打最常见的接口，不再先跑 4 个探测请求。
+    support = { support: 'yes', reason: null, minQuota: null, maxQuota: null, path: opts?.path || '/api/user/checkin' };
+  } else {
+    support = await fetchCheckinSupport(t);
+  }
   if (support.support === 'no') {
     return { outcome: 'manual_only', message: support.reason || '该站点不支持自动签到，只能到站点页面手动签到', gainedUsd: null };
   }
@@ -404,14 +556,28 @@ export async function doCheckin(t: Transport): Promise<CheckinResult> {
     return { outcome: 'unconfirmed', message: support.reason || '签到接口无法确认，正在尝试网页按钮签到', gainedUsd: null };
   }
 
-  const res = await t.request(support.path || '/api/user/checkin', { method: 'POST' });
+  let path = support.path || '/api/user/checkin';
+  let res = await t.request(path, { method: 'POST' });
+  // 缓存的旧路径可能已失效：一次 404 后才回到完整探测，不会说谎报成功。
+  if (opts?.assumeApi && res.status === 404) {
+    support = await fetchCheckinSupport(t);
+    if (support.support === 'yes') {
+      path = support.path || path;
+      res = await t.request(path, { method: 'POST' });
+    }
+  }
   const env = envelope(res);
 
-  if (env.success) {
+  const genericAwarded = num(env.data?.points ?? env.data?.credits ?? env.data?.reward);
+  if (env.success && (res.ok || genericAwarded != null)) {
     const awarded = num(env.data?.quota_awarded);
     return {
       outcome: 'success',
-      message: awarded != null ? `签到成功，本次获得 ${quotaToUsd(awarded)?.toFixed(3) ?? '—'} 美元等值额度` : '签到成功',
+      message: awarded != null
+        ? `签到成功，本次获得 ${quotaToUsd(awarded)?.toFixed(3) ?? '—'} 美元等值额度`
+        : genericAwarded != null
+          ? `签到成功，本次获得 ${genericAwarded} 积分`
+          : '签到成功',
       gainedUsd: quotaToUsd(awarded),
     };
   }
@@ -421,7 +587,7 @@ export async function doCheckin(t: Transport): Promise<CheckinResult> {
     return { outcome: 'manual_only', message: `该站点开启了人机验证（Turnstile），App 内代理签到无法通过，请到站点页面手动签到。原始信息：${msg}`, gainedUsd: null };
   }
   if (/already|已签到|重复签到|checked\s*in/i.test(msg)) {
-    return { outcome: 'failed', message: `今天已经签到过了（${msg}）`, gainedUsd: null };
+    return { outcome: 'success', message: `今天已经签到过了（${msg}）`, gainedUsd: null };
   }
   if (res.status === 0) {
     return { outcome: 'unconfirmed', message: `网络不可达，签到结果无法确认：${msg}`, gainedUsd: null };

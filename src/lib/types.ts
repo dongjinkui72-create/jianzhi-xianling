@@ -60,11 +60,17 @@ export interface Relay {
   apiBase: string | null;
   /** 签到方式：api 接口签到 / dom 网页按钮签到 */
   checkinMode: 'api' | 'dom' | null;
+  /** 实际签到接口路径（自定义站点与 New API 可能不同） */
+  checkinPath: string | null;
   quota: number | null;
   usedQuota: number | null;
   remainingUsd: number | null;
   /** 估算剩余 token 数 */
   remainingTokens: number | null;
+  /** 站点自己的代币名称（如 饼干 / token / 积分） */
+  balanceLabel: string | null;
+  /** 站点余额的原始展示文案（已带单位） */
+  balanceText: string | null;
   lastSyncAt: number | null;
   lastCheckinAt: number | null;
   note: string | null;

@@ -38,6 +38,7 @@ const ANDROID_PACKAGES = [
   'com.openclaw.app',
   'com.papercut.ai',
   'com.cherryai.studio',
+  'com.tauritavern.client',
 ];
 
 /** 已知 AI 聊天软件：URL Scheme（含本 App 自身） */

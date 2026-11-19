@@ -135,7 +135,6 @@ export function PoolScreen() {
         subtitle={`共 ${app.keys.length} 条 · 绿 ${groups.green.length} / 黄 ${groups.yellow.length} / 红 ${groups.red.length}`}
         right={
           <>
-            <IconButton icon="medkit-outline" onPress={() => app.runHealthCheck(false)} disabled={app.healthBusy || !app.keys.length} tone="ok" />
             <IconButton icon="settings-outline" onPress={() => navigationRef.isReady() && navigationRef.navigate('Settings')} tone="muted" />
           </>
         }

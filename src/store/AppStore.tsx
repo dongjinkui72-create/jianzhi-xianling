@@ -58,7 +58,7 @@ interface StoreValue {
 
   addRelayByUrl: (name: string, url: string, note?: string) => Promise<Relay>;
   updateRelay: (r: Relay) => Promise<void>;
-  removeRelay: (id: string) => Promise<void>;
+  removeRelay: (id: string) => Promise<number>;
   relayTransport: (r: Relay) => Transport | null;
   provisionRelay: (r: Relay, t: Transport, label?: string) => Promise<{ ok: boolean; message: string; key?: ApiKeyItem | null }>;
   persistAccessToken: (r: Relay, t: Transport) => Promise<{ ok: boolean; message: string }>;
@@ -137,6 +137,37 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             } as ChatClient);
           }
           cs = await DB.listClients();
+        } else {
+          // 升级安装也要继承旧数据，同时把内置适配器的新包名/协议同步进来（不覆盖用户已识别的包名）。
+          for (const seed of CHAT_APP_REGISTRY) {
+            const cur = cs.find((c) => c.id === seed.id);
+            if (!cur || !cur.builtin) continue;
+            const merged: ChatClient = {
+              ...cur,
+              name: seed.name,
+              scheme: seed.scheme,
+              androidPackage: cur.androidPackage || seed.androidPackage,
+              iosBundleId: cur.iosBundleId || seed.iosBundleId,
+              importKind: seed.importKind,
+              importTemplate: seed.importTemplate,
+              settingsTemplate: seed.settingsTemplate,
+              settingsBase: cur.settingsBase || seed.settingsBase,
+              launchTemplate: seed.launchTemplate,
+              browserBased: seed.browserBased,
+              note: seed.note,
+              platform: seed.platform,
+            };
+            if (
+              merged.name !== cur.name ||
+              merged.scheme !== cur.scheme ||
+              merged.androidPackage !== cur.androidPackage ||
+              merged.importKind !== cur.importKind ||
+              merged.note !== cur.note
+            ) {
+              await DB.upsertClient(merged);
+            }
+          }
+          cs = await DB.listClients();
         }
         setClients(cs);
 
@@ -156,6 +187,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
               hasSession: false,
               apiBase: null,
               checkinMode: null,
+              checkinPath: null,
               checkinSupport: 'unknown',
               checkinSupportNote: null,
               autoKeySupport: seed.kind === 'new-api' ? 'unknown' : 'no',
@@ -164,6 +196,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
               usedQuota: null,
               remainingUsd: null,
               remainingTokens: null,
+              balanceLabel: null,
+              balanceText: null,
               lastSyncAt: null,
               lastCheckinAt: null,
               note: seed.note,
@@ -362,6 +396,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       hasSession: false,
       apiBase: null,
       checkinMode: null,
+      checkinPath: null,
       checkinSupport: 'unknown',
       checkinSupportNote: null,
       autoKeySupport: 'unknown',
@@ -370,6 +405,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       usedQuota: null,
       remainingUsd: null,
       remainingTokens: null,
+      balanceLabel: null,
+      balanceText: null,
       lastSyncAt: null,
       lastCheckinAt: null,
       note: note ?? null,
@@ -391,8 +428,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const target = list.find((r) => r.id === id);
     if (target?.accessTokenRef) await delSecret(target.accessTokenRef);
     if (target?.credentialRef) await delSecret(target.credentialRef);
+
+    // 级联删除：中转站没了，它下面的 API Key 不能残留在可用池。
+    const linkedKeys = (await DB.listKeys()).filter((k) => k.relayId === id);
+    const linkedIds = new Set(linkedKeys.map((k) => k.id));
+    for (const k of linkedKeys) {
+      if (k.secretRef) await delSecret(k.secretRef);
+      await DB.deleteKey(k.id);
+    }
+    setKeys(await DB.listKeys());
+    setSelectedKeyId((cur) => (cur && linkedIds.has(cur) ? null : cur));
+
     await DB.deleteRelay(id);
     setRelays(await DB.listRelays());
+    return linkedKeys.length;
   }, []);
 
   /** 登录/粘贴 Key 后：后台读登录态、API 根与签到方式，把站点收进每日签到 */
@@ -410,8 +459,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       usedQuota: p.self?.usedQuota ?? r.usedQuota,
       remainingUsd,
       remainingTokens: p.self ? usdToTokensEstimate(remainingUsd) : r.remainingTokens,
+      balanceLabel: p.balanceLabel ?? p.self?.balanceLabel ?? r.balanceLabel,
+      balanceText: p.balanceText
+        ?? (p.self?.balanceAmount != null ? `${p.self.balanceAmount} ${p.self.balanceLabel || '代币'}` : null)
+        ?? r.balanceText,
       checkinSupport: p.checkinMode ? 'yes' : p.session ? p.checkinSupport : r.checkinSupport,
       checkinMode: p.checkinMode ?? r.checkinMode,
+      checkinPath: p.checkinPath ?? r.checkinPath,
       checkinSupportNote: p.session ? p.note : p.note || r.checkinSupportNote,
       lastSyncAt: Date.now(),
     };
@@ -514,6 +568,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (!t) return r;
     const selfRes = await fetchSelf(t);
     const support = await fetchCheckinSupport(t);
+    const customCheckin = !!(selfRes.ok && selfRes.self?.checkinPath);
     const remainingUsd = selfRes.ok ? quotaToUsd(selfRes.self?.quota ?? null) : r.remainingUsd;
     const next: Relay = {
       ...r,
@@ -523,14 +578,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       usedQuota: selfRes.ok ? selfRes.self!.usedQuota : r.usedQuota,
       remainingUsd,
       remainingTokens: usdToTokensEstimate(remainingUsd),
-      checkinSupport: support.support === 'yes'
+      balanceLabel: selfRes.self?.balanceLabel ?? r.balanceLabel,
+      balanceText: selfRes.self?.balanceAmount != null
+        ? `${selfRes.self.balanceAmount} ${selfRes.self.balanceLabel || '代币'}`
+        : r.balanceText,
+      checkinSupport: customCheckin || support.support === 'yes'
         ? 'yes'
         : support.support === 'no'
           ? 'no'
           : hasCheckinCapability(r)
             ? r.checkinSupport
             : support.support,
-      checkinMode: support.support === 'yes' ? 'api' : support.support === 'no' ? null : r.checkinMode,
+      checkinMode: customCheckin || support.support === 'yes' ? 'api' : support.support === 'no' ? null : r.checkinMode,
+      checkinPath: selfRes.self?.checkinPath ?? r.checkinPath,
       checkinSupportNote: support.support === 'yes'
         ? null
         : support.support === 'no'
@@ -571,7 +631,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
       let hb: Awaited<ReturnType<typeof headlessCheckin>> | null = null;
       if (useApi) {
-        const res = await doCheckin(t);
+        const res = await doCheckin(t, { assumeApi: r.checkinSupport === 'yes' && r.checkinMode === 'api', path: r.checkinPath });
         outcome = res.outcome;
         message = res.message;
         gained = res.gainedUsd;
@@ -600,8 +660,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             usedQuota: p.self?.usedQuota ?? r.usedQuota,
             remainingUsd: p.self ? quotaToUsd(p.self.quota) : r.remainingUsd,
             remainingTokens: p.self ? usdToTokensEstimate(quotaToUsd(p.self.quota)) : r.remainingTokens,
+            balanceLabel: p.balanceLabel ?? p.self?.balanceLabel ?? r.balanceLabel,
+            balanceText: p.balanceText
+              ?? (p.self?.balanceAmount != null ? `${p.self.balanceAmount} ${p.self.balanceLabel || '代币'}` : null)
+              ?? r.balanceText,
             checkinSupport: p.checkinSupport,
             checkinMode: hb?.mode ?? p.checkinMode,
+            checkinPath: p.checkinPath ?? hb?.probe?.checkinPath ?? r.checkinPath,
             checkinSupportNote: p.note,
           }
           : {}),
@@ -614,6 +679,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           hasSession: true,
           checkinSupport: 'yes',
           checkinMode: hb?.mode ?? r.checkinMode,
+          checkinPath: hb?.probe?.checkinPath ?? r.checkinPath,
           checkinSupportNote: null,
           lastCheckinAt: Date.now(),
           lastSyncAt: Date.now(),
@@ -638,7 +704,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         const targets = relays.filter(
           (r) => (r.accessTokenRef || r.hasSession || keys.some((k) => k.relayId === r.id)) && hasCheckinCapability(r),
         );
-        for (const r of targets) {
+        // 已存长期令牌且已知是接口签到的站点可以小并发；隐形 WebView 仍然串行，避免互相抢页面。
+        const fast = targets.filter((r) => (transports?.[r.id] || (r.accessTokenRef && r.checkinSupport === 'yes' && r.checkinMode === 'api')));
+        const slow = targets.filter((r) => !fast.some((x) => x.id === r.id));
+        for (let i = 0; i < fast.length; i += 3) {
+          const chunk = fast.slice(i, i + 3);
+          const rows = await Promise.all(chunk.map((r) => checkinRelay(r, transports?.[r.id] || relayTransport(r) || undefined)));
+          out.push(...rows);
+        }
+        for (const r of slow) {
           const t = transports?.[r.id] || relayTransport(r);
           // 没有长期凭据也照样走后台隐形 WebView（与登录 WebView 共享 Cookie），
           // 不能直接判成「只能手动」。

@@ -50,8 +50,10 @@ class JZAppListModule(private val ctx: ReactApplicationContext) : ReactContextBa
     }
 
     private fun norm(s: String): String {
+        // 去掉括号里的别名，例如 TauriTavern（tauritavern） -> tauritavern
+        val base = s.replace(Regex("[（(].*?[）)]"), " ")
         val sb = StringBuilder()
-        for (ch in s.lowercase()) {
+        for (ch in base.lowercase()) {
             if (ch.isLetterOrDigit()) sb.append(ch)
         }
         return sb.toString()
@@ -109,8 +111,7 @@ class JZAppListModule(private val ctx: ReactApplicationContext) : ReactContextBa
             promise.resolve(false)
         }
     }
-}
-`;
+}`;
 
 const PACKAGE_KT = `package com.jianzhi.xianling
 

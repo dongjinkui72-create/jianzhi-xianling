@@ -11,7 +11,7 @@ import { palette } from '../theme/tokens';
 import { useScale } from '../theme/useScale';
 import { navigationRef } from '../navigation/navRef';
 import { useApp } from '../store/AppStore';
-import type { ApiProtocol, Relay } from '../lib/types';
+import type { ApiKeyItem, ApiProtocol, Relay } from '../lib/types';
 
 /**
  * 中转站。
@@ -27,6 +27,48 @@ const PROTOCOLS: { id: ApiProtocol; label: string }[] = [
   { id: 'gemini', label: 'Gemini' },
   { id: 'claude', label: 'Claude' },
 ];
+
+interface KeyBalanceHint {
+  usd: number | null;
+  tokens: number | null;
+  count: number;
+  deadCount: number;
+}
+
+/** 站点没有会话余额时，用本站已保存 Key 的体检结果兜底。已失效 Key 不参与余额显示。 */
+function keyBalanceFor(relayId: string, keys: ApiKeyItem[]): KeyBalanceHint | null {
+  const all = keys.filter((k) => k.relayId === relayId);
+  if (!all.length) return null;
+  const rows = all.filter((k) => k.status !== 'dead' && (k.remainingUsd != null || k.remainingTokens != null));
+  const deadCount = all.filter((k) => k.status === 'dead').length;
+  if (!rows.length) return { usd: null, tokens: null, count: 0, deadCount };
+  let usd: number | null = null;
+  let tokens: number | null = null;
+  for (const k of rows) {
+    if (k.remainingUsd != null && (usd == null || k.remainingUsd > usd)) usd = k.remainingUsd;
+    if (k.remainingTokens != null && (tokens == null || k.remainingTokens > tokens)) tokens = k.remainingTokens;
+  }
+  return { usd, tokens, count: rows.length, deadCount };
+}
+
+/** 已保存中转站列表直接显示的站点代币余额 */
+function relayBalance(r: Relay, keyBalance?: KeyBalanceHint | null): string {
+  const deadSuffix = keyBalance && keyBalance.count === 0 && keyBalance.deadCount > 0 ? ' · 已存 Key 已失效' : '';
+  if (r.balanceText) {
+    const usd = r.remainingUsd != null ? ` · 约 ${formatUsd(r.remainingUsd)}` : '';
+    return `${r.balanceText}${usd}${deadSuffix}`;
+  }
+  if (r.quota != null) {
+    const usd = r.remainingUsd != null ? `（约 ${formatUsd(r.remainingUsd)}）` : '';
+    return `${Math.round(r.quota).toLocaleString('en-US')} 站点代币${usd}${deadSuffix}`;
+  }
+  if (r.remainingUsd != null) return `${formatUsd(r.remainingUsd)}${deadSuffix}`;
+  if (keyBalance?.usd != null) return `${formatUsd(keyBalance.usd)}（Key 体检）`;
+  if (keyBalance?.tokens != null) return `${compactNumber(keyBalance.tokens)} tokens（Key 体检）`;
+  if (r.remainingTokens != null) return `${compactNumber(r.remainingTokens)} tokens${deadSuffix}`;
+  if (keyBalance && keyBalance.count === 0 && keyBalance.deadCount > 0) return '已保存 Key 已失效';
+  return r.hasSession || r.accessTokenRef ? '暂无可查询余额' : '登录后自动同步';
+}
 
 function supportChip(state: Relay['checkinSupport']) {
   if (state === 'yes') return <Chip label="支持自动签到" tone="ok" icon="checkmark-circle" />;
@@ -44,6 +86,7 @@ export function RelayScreen() {
   const [logOpen, setLogOpen] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [toast, setToast] = useState<{ tone: 'ok' | 'warn' | 'danger' | 'muted'; title: string; body: string } | null>(null);
+  const [relayHealth, setRelayHealth] = useState<Record<string, 'ok' | 'down' | 'unknown'>>({});
 
   const [newName, setNewName] = useState('');
   const [newUrl, setNewUrl] = useState('');
@@ -61,6 +104,30 @@ export function RelayScreen() {
       ),
     [app.relays, app.keys],
   );
+  // 站点可用性检查：不能把旧余额当成现在还能用。
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const next: Record<string, 'ok' | 'down' | 'unknown'> = {};
+      await Promise.all(saved.map(async (r) => {
+        let origin = r.baseUrl;
+        try { origin = new URL(r.baseUrl).origin; } catch { /* keep raw */ }
+        const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+        const timer = setTimeout(() => ctrl?.abort(), 8000);
+        try {
+          const res = await fetch(origin, { method: 'GET', headers: { Accept: 'text/html,application/json' }, signal: ctrl?.signal });
+          next[r.id] = res.status > 0 && res.status < 500 ? 'ok' : 'down';
+        } catch {
+          next[r.id] = 'down';
+        } finally {
+          clearTimeout(timer);
+        }
+      }));
+      if (!cancelled) setRelayHealth(next);
+    })();
+    return () => { cancelled = true; };
+  }, [saved]);
+
   /** 每日签到列表：只放已检测到免费签到入口的站点；没有签到功能的只留在下方本地列表。 */
   const { checkin: checkinList } = useMemo(() => splitRelaysForCheckin(saved), [saved]);
   const directory = useMemo(() => app.relays.filter((r) => !saved.some((x) => x.id === r.id)), [app.relays, saved]);
@@ -82,10 +149,12 @@ export function RelayScreen() {
   useEffect(() => {
     if (probedOnce.current) return;
     probedOnce.current = true;
-    const targets = saved.filter((r) => r.checkinSupport !== 'yes').slice(0, 2);
+    // 升级后旧数据里可能只有签到能力、没有余额：进入页面时也重新同步一次，把 77625 这类自定义站的积分读回来。
+    const targets = saved.filter((r) => r.checkinSupport !== 'yes' || !r.balanceText).slice(0, 3);
     (async () => {
       for (const r of targets) {
-        await app.probeRelay(r).catch(() => {});
+        if (r.accessTokenRef) await app.syncRelay(r).catch(() => {});
+        else await app.probeRelay(r).catch(() => {});
       }
     })();
   }, [saved, app]);
@@ -252,10 +321,14 @@ export function RelayScreen() {
             </View>
           ) : (
             <View style={{ marginTop: sc.s(12) }}>
-              {checkinList.map((r) => (
+              {checkinList.map((r) => {
+                const cbal = relayBalance(r, keyBalanceFor(r.id, app.keys));
+                const cdown = relayHealth[r.id] === 'down';
+                return (
                 <View key={r.id} style={{ flexDirection: 'row', alignItems: 'center', gap: sc.s(9), paddingVertical: sc.s(8), borderTopWidth: 1, borderTopColor: palette.hairlineSoft }}>
                   <View style={{ flex: 1 }}>
                     <Text numberOfLines={1} style={{ fontSize: sc.fs(13.5), fontWeight: '700', color: palette.ink }}>{r.name}</Text>
+                    <Text numberOfLines={1} style={{ fontSize: sc.fs(11.5), fontWeight: '700', color: cdown ? palette.danger : palette.accent, marginTop: sc.s(2) }}>{cdown ? `站点不可用 · 上次余额：${cbal}` : `余额：${cbal}`}</Text>
                     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sc.s(5), marginTop: sc.s(4) }}>
                       {supportChip(r.checkinSupport)}
                       <Chip label={r.lastCheckinAt ? `上次 ${relativeTime(r.lastCheckinAt)}` : '从未签到'} tone="muted" />
@@ -270,7 +343,8 @@ export function RelayScreen() {
                     onPress={() => doCheckin(r)}
                   />
                 </View>
-              ))}
+                );
+              })}
             </View>
           )}
 
@@ -296,6 +370,10 @@ export function RelayScreen() {
         ) : (
           saved.map((r) => {
             const open = allOpen ? true : !!openRows[r.id];
+            const kb = keyBalanceFor(r.id, app.keys);
+            const bal = relayBalance(r, kb);
+            const down = relayHealth[r.id] === 'down';
+            const warn = down || /失效|不可用/.test(bal);
             return (
               <Glass key={r.id} pad={0} style={{ marginBottom: sc.s(10) }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', padding: sc.s(13), gap: sc.s(9) }}>
@@ -304,8 +382,12 @@ export function RelayScreen() {
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text numberOfLines={1} style={{ fontSize: sc.fs(14.5), fontWeight: '800', color: palette.ink }}>{r.name}</Text>
+                    <Text numberOfLines={1} style={{ fontSize: sc.fs(12), fontWeight: '700', color: warn ? palette.danger : palette.accent, marginTop: sc.s(2) }}>{down ? `站点不可用 · 上次余额：${bal}` : `余额：${bal}`}</Text>
                     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: sc.s(5), marginTop: sc.s(4) }}>
-                      <Chip label={r.remainingTokens != null ? `剩余 ${compactNumber(r.remainingTokens)} tokens` : r.remainingUsd != null ? `剩余 ${formatUsd(r.remainingUsd)}` : '剩余 token 未知'} tone={r.remainingUsd != null && r.remainingUsd < app.settings.lowUsdThreshold ? 'danger' : 'ok'} icon="pie-chart-outline" />
+                      {down ? <Chip label="站点无法访问" tone="danger" icon="alert-circle" /> : null}
+                      {!r.balanceText && !kb ? (
+                        <Chip label={r.remainingTokens != null ? `剩余 ${compactNumber(r.remainingTokens)} tokens` : r.remainingUsd != null ? `剩余 ${formatUsd(r.remainingUsd)}` : 'Key 未体检'} tone={r.remainingUsd != null && r.remainingUsd < app.settings.lowUsdThreshold ? 'danger' : 'ok'} icon="pie-chart-outline" />
+                      ) : null}
                       <Chip
                         label={r.accessTokenRef ? '已存长期凭据' : r.hasSession ? '已登录（网页会话）' : '需网页登录'}
                         tone={r.accessTokenRef || r.hasSession ? 'ok' : 'muted'}
@@ -318,8 +400,8 @@ export function RelayScreen() {
                 {open ? (
                   <View style={{ paddingHorizontal: sc.s(13), paddingBottom: sc.s(13), borderTopWidth: 1, borderTopColor: palette.hairlineSoft, paddingTop: sc.s(10) }}>
                     <KeyValue k="站点链接" v={r.baseUrl} mono />
-                    <KeyValue k="剩余 token" v={r.remainingTokens != null ? `${Math.round(r.remainingTokens).toLocaleString('en-US')} tokens（约 ${formatUsd(r.remainingUsd)}）` : '未同步，点下方「同步余额」'} />
-                    <KeyValue k="账户余额" v={r.quota != null ? `${formatUsd(quotaToUsd(r.quota))}（已用 ${formatUsd(quotaToUsd(r.usedQuota))}）` : '未知'} />
+                    <KeyValue k="站点余额" v={relayBalance(r, kb)} />
+                    <KeyValue k="账户余额" v={r.quota != null ? `${formatUsd(quotaToUsd(r.quota))}（已用 ${formatUsd(quotaToUsd(r.usedQuota))}）` : r.balanceText || '未同步'} />
                     <KeyValue k="站点用户" v={r.username ? `${r.username}（ID ${r.userId ?? '—'}）` : r.hasSession ? '已登录（网页会话已保存）' : '未登录（点下方「打开并登录」）'} />
                     <KeyValue k="签到能力" v={r.checkinSupport === 'yes' ? '支持自动签到' : r.checkinSupport === 'no' ? `不支持：${r.checkinSupportNote || '站点未开启'}` : `无法确认：${r.checkinSupportNote || '尚未探测'}`} />
                     <KeyValue k="自动建档" v={r.autoKeySupport === 'yes' ? '已成功自动建档' : r.autoKeySupport === 'no' ? `不支持：${r.autoKeyNote || ''}` : `无法确认${r.autoKeyNote ? `：${r.autoKeyNote}` : ''}`} />
@@ -342,8 +424,14 @@ export function RelayScreen() {
                         size="sm"
                         tone="danger"
                         onPress={async () => {
-                          await app.removeRelay(r.id);
-                          setToast({ tone: 'muted', title: '已移除', body: `${r.name} 及其本机凭据已从加密区删除` });
+                          const n = await app.removeRelay(r.id);
+                          setToast({
+                            tone: 'muted',
+                            title: '已移除',
+                            body: n > 0
+                              ? `${r.name} 及其 ${n} 条 API Key 已从可用池和本机加密区删除`
+                              : `${r.name} 及其本机凭据已从加密区删除`,
+                          });
                         }}
                       />
                     </View>

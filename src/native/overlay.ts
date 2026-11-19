@@ -10,6 +10,7 @@ interface OverlayNative {
   canOverlay(): Promise<boolean>;
   requestOverlay(): Promise<boolean>;
   show(title: string, base: string, key: string): Promise<boolean>;
+  showAndLaunch(packageName: string, schemeUrl: string, title: string, base: string, key: string): Promise<{ shown: boolean; launched: boolean }>;
   hide(): Promise<boolean>;
 }
 
@@ -43,6 +44,22 @@ export async function showCredentialOverlay(title: string, base: string, key: st
     return await mod.show(title, base, key);
   } catch {
     return false;
+  }
+}
+
+export async function showAndLaunchOverlay(
+  packageName: string | null,
+  schemeUrl: string,
+  title: string,
+  base: string,
+  key: string,
+): Promise<{ shown: boolean; launched: boolean }> {
+  if (!mod || typeof mod.showAndLaunch !== 'function') return { shown: false, launched: false };
+  try {
+    const r = await mod.showAndLaunch(packageName || '', schemeUrl || '', title, base, key);
+    return { shown: !!r?.shown, launched: !!r?.launched };
+  } catch {
+    return { shown: false, launched: false };
   }
 }
 

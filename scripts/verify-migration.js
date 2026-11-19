@@ -1,6 +1,6 @@
 /* eslint-disable */
 /**
- * 升级迁移仿真：用 Node 内置 sqlite 复刻「旧库 22 列 -> PRAGMA 自愈迁移 -> 新 24 列插入」，
+ * 升级迁移仿真：用 Node 内置 sqlite 复刻「旧库 22 列 -> PRAGMA 自愈迁移 -> 新 27 列插入」，
  * 并断言旧数据（用户的中转站）在迁移后完好保留。
  * 对应真机事故：Error code 1: 24 values for 22 columns。
  */
@@ -27,6 +27,9 @@ const EXPECTED_COLUMNS = {
   relays: [
     ['api_base', 'TEXT'],
     ['checkin_mode', 'TEXT'],
+    ['checkin_path', 'TEXT'],
+    ['balance_label', 'TEXT'],
+    ['balance_text', 'TEXT'],
   ],
 };
 for (const table of Object.keys(EXPECTED_COLUMNS)) {
@@ -38,16 +41,17 @@ for (const table of Object.keys(EXPECTED_COLUMNS)) {
   }
 }
 
-// ---- 2.0 的 24 值 INSERT 必须成功 ----
+// ---- 2.0 的 27 值 INSERT 必须成功 ----
 db.prepare(
   `INSERT INTO relays (id, name, base_url, kind, user_id, username, access_token_ref, credential_ref,
-     has_session, api_base, checkin_mode, checkin_support, checkin_note, auto_key_support, auto_key_note,
-     quota, used_quota, remaining_usd, remaining_tokens, last_sync_at, last_checkin_at, note, builtin, created_at)
-   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+     has_session, api_base, checkin_mode, checkin_path, checkin_support, checkin_note, auto_key_support, auto_key_note,
+     quota, used_quota, remaining_usd, remaining_tokens, balance_label, balance_text,
+     last_sync_at, last_checkin_at, note, builtin, created_at)
+   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 ).run(
   'relay_new', '新站', 'https://new.example.com', 'new-api', 7, 'u', null, null,
-  1, 'https://new.example.com/apiroot', 'dom', 'yes', null, 'yes', null,
-  500000, 0, 1, 700000, 1700000001000, null, null, 0, 1700000001000,
+  1, 'https://new.example.com/apiroot', 'api', '/api/account/checkin', 'yes', null, 'yes', null,
+  500000, 0, 1, 700000, '饼干', '88 饼干', 1700000001000, null, null, 0, 1700000001000,
 );
 
 // ---- 旧数据必须还在，且新列可读 ----
@@ -68,9 +72,9 @@ for (const table of Object.keys(EXPECTED_COLUMNS)) {
   }
 }
 const cols = db.prepare('PRAGMA table_info(relays)').all().map((r) => r.name);
-assert.strictEqual(cols.length, 24, '列数应为 24，实际 ' + cols.length);
+assert.strictEqual(cols.length, 27, '列数应为 27，实际 ' + cols.length);
 
-console.log('✅ 升级迁移仿真通过：22 列旧库 -> 24 列，旧数据保留，迁移幂等');
+console.log('✅ 升级迁移仿真通过：22 列旧库 -> 27 列，旧数据保留，迁移幂等');
 // ---- 静态检查：db.ts 里每条 INSERT 的列数必须等于占位符数 ----
 const fs2 = require('fs');
 const path2 = require('path');

@@ -198,6 +198,22 @@ t('协议映射齐全（claude/gemini 走对应 keyVaults 与 type）', () => {
   assert.strictEqual(I.chatboxTypeFor('openai_compatible'), 'openai_compatible');
 });
 
+console.log('\n[7.5] 自定义中转站（如 77625）余额与签到路径');
+t('credits / checkin_points 被识别为积分余额与自定义签到路径', () => {
+  const me = R.parseGenericAccount({ id: 9, username: 'u', credits: 120, checkin_points: 10 });
+  assert.ok(me, '应识别为账号');
+  assert.strictEqual(me.balanceAmount, 120);
+  assert.strictEqual(me.balanceLabel, '积分');
+  assert.strictEqual(me.checkinPath, '/api/account/checkin');
+});
+t('嵌套账号与中文数量级余额也能读取', () => {
+  const me = R.parseGenericAccount({ data: { user_id: 7, name: 'n', balance: '1.2万', checked_in_today: false } });
+  assert.ok(me, '应识别嵌套账号');
+  assert.strictEqual(me.id, 7);
+  assert.strictEqual(me.balanceAmount, 12000);
+  assert.strictEqual(me.checkinPath, '/api/account/checkin');
+});
+
 console.log('\n[8] 适配器登记表 —— 诚实性不变量');
 t('标「可全自动导入」的适配器必须有模板', () => {
   for (const c of REG.CHAT_APP_REGISTRY) {
@@ -220,6 +236,21 @@ t('内置适配器覆盖开源项目（GitHub）', () => {
   const ids = REG.CHAT_APP_REGISTRY.map((c) => c.id);
   for (const need of ['deepchat', 'cherrystudio', 'lobechat']) assert.ok(ids.includes(need), '缺少 ' + need);
 });
+t('TauriTavern 使用真实 Android 包名，不靠虚构 Scheme 启动', () => {
+  const tt = REG.CHAT_APP_REGISTRY.find((c) => c.id === 'tauritavern');
+  assert.ok(tt, '缺少 tauritavern');
+  assert.strictEqual(tt.androidPackage, 'com.tauritavern.client');
+  assert.strictEqual(tt.scheme, null);
+  assert.strictEqual(I.canAutoImport(tt), false, 'TauriTavern 不应谎报可自动写入');
+});
+t('悬浮窗先显示再拉起 App 的原生入口存在', () => {
+  const fs = require('fs');
+  const kt = fs.readFileSync(path.join(__dirname, '..', 'android', 'app', 'src', 'main', 'java', 'com', 'jianzhi', 'xianling', 'JZOverlayModule.kt'), 'utf8');
+  assert.ok(kt.includes('fun showAndLaunch('), '缺少 showAndLaunch');
+  const fn = kt.slice(kt.indexOf('fun showAndLaunch('));
+  assert.ok(fn.indexOf('shown = buildUi(title)') < fn.indexOf('ctx.startActivity(i)'), '必须先显示悬浮窗再启动目标 App');
+});
+
 t('仓库自带 adapters/clients.json 合法且与内置一致', () => {
   const fs = require('fs');
   const file = path.join(__dirname, '..', 'adapters', 'clients.json');
@@ -257,6 +288,18 @@ t('设置页/启动流程只保留可导入软件（大厂官方 App 被排除�
     assert.ok(!ids.includes(banned), banned + ' 不应出现在可导入列表');
   }
 });
+console.log('\n[9.5] 删除中转站级联清理 API Key');
+t('删除中转站时会同步删除关联 Key 与加密引用', () => {
+  const fs = require('fs');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'store', 'AppStore.tsx'), 'utf8');
+  const start = src.indexOf('const removeRelay = useCallback');
+  const block = src.slice(start, src.indexOf('/** 登录/粘贴 Key', start));
+  assert.ok(block.includes("filter((k) => k.relayId === id)"), '必须只删除该中转站关联的 Key');
+  assert.ok(block.includes('delSecret(k.secretRef)'), '必须删除 SecureStore 中的真实密钥');
+  assert.ok(block.includes('DB.deleteKey(k.id)'), '必须删除本机数据库里的 Key');
+  assert.ok(block.includes('setSelectedKeyId'), '删除后要清掉已选中状态');
+});
+
 console.log('\n[10] API 根嗅探（公益站/路由站 404 场景回归）');
 t('探针记录的带前缀 API 地址能被还原成候选根', () => {
   const cands = R.deriveApiCandidates(['https://ly.7625.xyz/apiroot/api/user/self'], 'https://ly.7625.xyz');
